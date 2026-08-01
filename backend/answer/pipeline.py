@@ -12,12 +12,21 @@
 from __future__ import annotations
 
 import sys
+from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
 
 from backend.answer.classify import build_client, classify, load_catalog
 from backend.answer.draft import Draft, load_materials, make_draft
 from backend.sheets.extract import Entry, read_entries
+from backend.sheets.goldset import classify as rule_classify
+from backend.sheets.goldset import sheet_grade_of
+
+GRADE_WORD = {"green": "그린", "blue": "블루"}
+
+# 규칙 기반으로 먼저 걸러 LLM 판정 대상을 좁힌다. 초안이 나올 수 있는 것은 문항·운영뿐인데,
+# 앞선 실행에서 151건을 전부 판정하느라 판정 비용의 4/5를 초안 없이 태웠다.
+DRAFTABLE_CATEGORIES = ("문항", "운영")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SHEETS_ROOT = PROJECT_ROOT / "raw" / "sheets"
@@ -35,18 +44,23 @@ class Row:
     reason: str
     draft: Draft | None
     error: str
+    asked_grade: bool = False  # 되묻기 후 등급을 받아 재판정한 건인가
 
 
 def collect_questions() -> list[Entry]:
+    """초안이 나올 수 있는 질문만 추린다 — 규칙 기반 1차 스크리닝."""
     entries: list[Entry] = []
     for path in sorted(SHEETS_ROOT.rglob("*.xlsx")):
-        entries.extend(read_entries(path))
+        for entry in read_entries(path):
+            if rule_classify(entry).category in DRAFTABLE_CATEGORIES:
+                entries.append(entry)
     return entries
 
 
 def render(rows: list[Row], drafted: int) -> str:
     flagged = [r for r in rows if r.draft and r.draft.flags]
     low = [r for r in rows if r.draft and r.draft.confidence == "low"]
+    after_ask = [r for r in rows if r.draft and r.asked_grade]
 
     out = [
         "# 초안 검수 리포트",
@@ -60,9 +74,12 @@ def render(rows: list[Row], drafted: int) -> str:
         "## 요약",
         "",
         f"- 처리한 질문: {len(rows)}건",
-        f"- 초안 생성: **{drafted}건**",
+        f"- 초안 생성: **{drafted}건** (그중 등급 되묻기 후 답변 {len(after_ask)}건)",
         f"- 플래그 붙은 초안: {len(flagged)}건",
         f"- 신뢰도 low: {len(low)}건",
+        "",
+        "등급 되묻기 후 답변한 건은 실제 운영의 2턴 대화를 재현한 것이다 — 담당자가",
+        "\"그린이신가요 블루이신가요\"를 묻고 답을 받은 뒤의 상태.",
         "",
         "---",
         "",
@@ -74,8 +91,9 @@ def render(rows: list[Row], drafted: int) -> str:
             continue
         index += 1
         draft = row.draft
+        turn = " · 되묻기 후" if row.asked_grade else ""
         out += [
-            f"## {index}. {row.category} · `{row.anchor or '-'}` · 신뢰도 {draft.confidence}",
+            f"## {index}. {row.category} · `{row.anchor or '-'}` · 신뢰도 {draft.confidence}{turn}",
             "",
             f"**질문**: {row.question}",
             "",
@@ -113,6 +131,12 @@ def main() -> None:
     catalog = load_catalog()
     entries = collect_questions()
 
+    # 크레딧을 예고 없이 태우지 않도록 상한을 먼저 밝힌다.
+    # 판정 12원 + 되묻기 재판정 12원 + 초안 99원 (2026-08-01 실측)
+    max_cost = len(entries) * 24 + target * 99
+    print(f"대상 {len(entries)}건 (규칙 스크리닝 후) / 초안 목표 {target}건")
+    print(f"최대 예상 비용 약 {max_cost:,}원 — 초안 목표에 도달하면 조기 종료\n")
+
     rows: list[Row] = []
     drafted = 0
 
@@ -126,6 +150,22 @@ def main() -> None:
             rows.append(Row(entry.question, "-", "", "-", "", None, f"판정 실패: {exc}"))
             continue
 
+        # 되묻기 이후를 재현한다. 실제 운영에서는 담당자가 "그린이신가요 블루이신가요"를
+        # 물어 답을 받는데, 시트가 등급별로 나뉘어 있으므로 그 등급이 곧 응시자의 답이다.
+        # 1턴에서 끊으면 되묻기가 전부 미답변으로 집계돼 기여도가 실제보다 낮게 나온다.
+        asked_grade = False
+        if judgment.action == "ask_grade":
+            grade = GRADE_WORD.get(sheet_grade_of(entry.source), "")
+            if grade:
+                asked_grade = True
+                try:
+                    judgment, _ = classify(client, f"[{grade} 등급] {entry.question}", catalog)
+                except Exception as exc:
+                    rows.append(
+                        Row(entry.question, "-", "", "-", "", None, f"재판정 실패: {exc}", True)
+                    )
+                    continue
+
         row = Row(
             question=entry.question,
             category=judgment.category,
@@ -134,6 +174,7 @@ def main() -> None:
             reason=judgment.reason,
             draft=None,
             error="",
+            asked_grade=asked_grade,
         )
 
         if judgment.action == "answer" and judgment.anchor:
@@ -149,9 +190,12 @@ def main() -> None:
 
         rows.append(row)
 
-    OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    OUT_PATH.write_text(render(rows, drafted), encoding="utf-8")
-    print(f"\n질문 {len(rows)}건 처리 / 초안 {drafted}건 → {OUT_PATH}")
+    # 실행마다 새 파일로 남긴다. 앞선 실행에서 재실행이 이전 리포트를 덮어써 결과를 잃었다.
+    stamp = datetime.now().strftime("%m%d-%H%M")
+    out_path = OUT_PATH.with_name(f"draft-review-{stamp}.md")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(render(rows, drafted), encoding="utf-8")
+    print(f"\n질문 {len(rows)}건 처리 / 초안 {drafted}건 → {out_path}")
 
 
 if __name__ == "__main__":
