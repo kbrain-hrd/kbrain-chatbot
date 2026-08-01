@@ -3,3 +3,7 @@ __pycache__/
 *.pyc
 .env
 raw/
+
+# 실제 질문 모음 — 개인정보 컬럼은 제거했으나 본문에 소속기관·이름이 언급될 수
+# 있어 원격에 올리지 않는다. backend/sheets/extract.py 로 언제든 재생성 가능.
+eval/questions.md

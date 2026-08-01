@@ -41,6 +41,7 @@ class Question:
     answer: str
     note: str  # 근거·검증 요약 (있는 경우)
     question: str  # 문제지에서 뽑은 질문 요약 (추출 실패 시 빈 문자열)
+    disputed: bool  # 공식 정답에 오류가 확인된 문항인가
 
 
 def parse_front_matter(text: str) -> dict[str, str]:
@@ -157,6 +158,11 @@ def extract_questions(path: Path) -> list[Question]:
     prefix = meta["anchor_prefix"]
     question_texts = extract_question_texts(path.with_name("problems.md"))
 
+    # 출제기관이 오류를 인정한 문항 — 정답을 그대로 내보내면 안 된다.
+    disputed = set()
+    if meta.get("official_answer_disputed") == "true":
+        disputed = {int(n) for n in re.findall(r"\d+", meta.get("disputed_questions", ""))}
+
     questions = []
     for cells in rows:
         if len(cells) <= answer_at:
@@ -174,6 +180,7 @@ def extract_questions(path: Path) -> list[Question]:
                 answer=cells[answer_at],
                 note=cells[note_at] if note_at is not None and len(cells) > note_at else "",
                 question=question_texts.get(question_no, ""),
+                disputed=question_no in disputed,
             )
         )
     return questions
@@ -298,6 +305,25 @@ def render(questions: list[Question], ops: list[OpsSection]) -> str:
         "",
     ]
 
+    disputed = [q for q in questions if q.disputed]
+    if disputed:
+        out += [
+            f"## ⚠️ 공식 정답에 오류가 확인된 문항 ({len(disputed)}건)",
+            "",
+            "출제기관이 오류를 인정하고 **수정 예정**인 문항이다. 아래 표의 정답은 **수정 전 값**이므로",
+            "**정답이라고 단정해 답변하지 말 것.** 판정 대신 경위를 안내하고 사람에게 넘긴다.",
+            "",
+            "| 앵커 | 수정 전 공식 정답 | 내용 |",
+            "|---|---|---|",
+        ]
+        for q in disputed:
+            out.append(f"| `{q.anchor}` | {q.answer} | {q.note.replace('|', '·')} |")
+        out += [
+            "",
+            "경위는 해당 답안지 파일(`content/selfstudy/.../answers.md`) 상단에 전문이 있다.",
+            "",
+        ]
+
     subject_names = {1: "콘텐츠", 2: "데이터분석"}
 
     for grade in ("green", "blue"):
@@ -321,7 +347,8 @@ def render(questions: list[Question], ops: list[OpsSection]) -> str:
                 for q in items:
                     note = q.note.replace("|", "·")
                     question = q.question.replace("|", "·") or "*(문제지 추출 실패 — 원문 확인 필요)*"
-                    out.append(f"| `{q.anchor}` | {q.points} | {question} | {q.answer} | {note} |")
+                    answer = f"⚠️ {q.answer}" if q.disputed else q.answer
+                    out.append(f"| `{q.anchor}` | {q.points} | {question} | {answer} | {note} |")
                 out.append("")
 
     out += [
