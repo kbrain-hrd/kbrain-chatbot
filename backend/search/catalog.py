@@ -19,8 +19,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 CONTENT_ROOT = Path("content/selfstudy")
+OPERATIONS_ROOT = Path("content/operations")
 CATALOG_PATH = Path("content/catalog.md")
 OVERRIDES_PATH = Path("content/question-overrides.md")
+
+OPS_HEADING_RE = re.compile(r"^## \[(OPS-[^\]]+)\]\s*(.+)$")
 
 # 3과목은 단답 정답이 없는 산출물 평가라 문항 앵커가 성립하지 않는다.
 SHORT_ANSWER_SUBJECTS = (1, 2)
@@ -254,7 +257,33 @@ def suspect_questions(questions: list[Question]) -> list[tuple[str, str]]:
     return suspects
 
 
-def render(questions: list[Question]) -> str:
+@dataclass(frozen=True)
+class OpsSection:
+    anchor: str
+    doc: str
+    title: str
+    length: int  # 본문 길이 — 조회 비용 가늠용
+
+
+def collect_operations() -> list[OpsSection]:
+    """운영 자료의 섹션 앵커를 모은다.
+
+    운영 질문은 문항 구조가 없어 섹션 단위로 특정한다. 제목만으로 고를 수 있도록
+    카탈로그에 목록을 싣는다.
+    """
+    sections: list[OpsSection] = []
+    for path in sorted(OPERATIONS_ROOT.glob("*.md")):
+        doc = path.stem
+        lines = path.read_text(encoding="utf-8").splitlines()
+        starts = [(i, m) for i, line in enumerate(lines) if (m := OPS_HEADING_RE.match(line))]
+        for order, (index, match) in enumerate(starts):
+            end = starts[order + 1][0] if order + 1 < len(starts) else len(lines)
+            body = "\n".join(lines[index + 1 : end]).strip()
+            sections.append(OpsSection(match.group(1), doc, match.group(2).strip(), len(body)))
+    return sections
+
+
+def render(questions: list[Question], ops: list[OpsSection]) -> str:
     out = [
         "# 앵커 카탈로그",
         "",
@@ -265,6 +294,7 @@ def render(questions: list[Question]) -> str:
         "같고 정답만 다르므로, 등급을 빠뜨리면 엉뚱한 정답을 근거로 답하게 된다.",
         "",
         f"총 {len(questions)}문항 (1·2과목 × 5세트 × 2등급 × 5문항). 3과목은 단답 정답이 없어 제외.",
+        f"운영 자료 섹션 {len(ops)}개는 문서 끝에 별도로 싣는다.",
         "",
     ]
 
@@ -294,17 +324,44 @@ def render(questions: list[Question]) -> str:
                     out.append(f"| `{q.anchor}` | {q.points} | {question} | {q.answer} | {note} |")
                 out.append("")
 
+    out += [
+        "## 운영 자료",
+        "",
+        "운영 질문(신청 방법·응시 환경·합격 기준·일정 등)의 근거다. 문항 구조가 없어 **섹션 단위**로 특정한다.",
+        "본문 길이는 조회 비용 가늠용이며, 긴 섹션은 통째로 싣기 전에 필요한 부분을 확인하세요.",
+        "",
+        "**FAQ가 가장 밀도 높다** — `OPS-셀프학습가이드-부록2인증평가FAQ수행평가관련자주묻는질문` 에",
+        "인증 방식·합격 기준(75점)·CBT 진행·평가 일정·재응시·인증서 발급·문의처가 모두 들어 있다.",
+        "",
+        "| 앵커 | 문서 | 섹션 | 본문 길이 |",
+        "|---|---|---|---|",
+    ]
+    for section in ops:
+        out.append(f"| `{section.anchor}` | {section.doc} | {section.title} | {section.length:,} |")
+    out += [
+        "",
+        "**미수록:** 교육과정 종합안내서(60p)는 디자인 브로슈어라 읽기 순서가 뒤엉켜 후순위입니다",
+        "— `docs/05-data-survey.md` 5장.",
+    ]
+
     return "\n".join(out).rstrip() + "\n"
 
 
 def main() -> None:
     questions = collect()
+    ops = collect_operations()
     problems = check(questions)
 
-    CATALOG_PATH.write_text(render(questions), encoding="utf-8")
+    ops_anchors = [s.anchor for s in ops]
+    duplicated = {a for a in ops_anchors if ops_anchors.count(a) > 1}
+    if duplicated:
+        problems.append(f"운영 섹션 앵커 중복: {sorted(duplicated)}")
+
+    CATALOG_PATH.write_text(render(questions, ops), encoding="utf-8")
 
     size = CATALOG_PATH.stat().st_size
-    print(f"문항 {len(questions)}개 → {CATALOG_PATH} ({size:,} bytes, 대략 {size // 3:,} 토큰)")
+    print(f"문항 {len(questions)}개 + 운영 섹션 {len(ops)}개 → {CATALOG_PATH} "
+          f"({size:,} bytes, 대략 {size // 3:,} 토큰)")
 
     absent = missing_questions(questions)
     if absent:
