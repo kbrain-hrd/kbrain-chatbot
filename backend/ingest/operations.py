@@ -156,21 +156,55 @@ def extract_html(path: Path) -> list[Section]:
 
 # ---------------------------------------------------------------- PDF
 
+# 로마숫자·장번호만 있거나 지나치게 짧은 줄은 섹션 제목이 될 수 없다
+NOT_A_TITLE_RE = re.compile(r"[IVXⅠⅡⅢⅣⅤ\dI\s.·\-]{1,6}")
+
+
+def running_headers(pages: list[list[str]]) -> set[str]:
+    """페이지마다 반복되는 머리글을 찾는다.
+
+    슬라이드형 PDF는 상단에 문서명·회차 같은 고정 문구를 매 장 반복한다. 그대로 두면
+    그것이 섹션 제목으로 잡혀 실제 목차가 사라진다. 전체의 30% 이상 페이지에
+    나타나는 앞부분 줄을 머리글로 본다.
+    """
+    from collections import Counter
+
+    counts: Counter[str] = Counter()
+    for lines in pages:
+        for line in lines[:3]:
+            counts[line] += 1
+
+    threshold = max(2, len(pages) * 3 // 10)
+    return {line for line, count in counts.items() if count >= threshold}
+
+
 def extract_pdf(path: Path) -> list[Section]:
     """슬라이드형 PDF는 **페이지 상단 첫 줄이 제목** 역할을 한다.
 
     번호가 붙은 절 제목이 없으므로 페이지 제목으로 섹션을 나누고, 같은 제목이
     연달아 나오면(여러 장에 걸친 설명) 하나로 합친다.
+    반복 머리글과 쪽번호만 있는 줄은 제목 후보에서 뺀다.
     """
+    raw_pages = []
+    for page in extract_pdfium(path):
+        lines = [re.sub(r"\s+", " ", line).strip() for line in page.splitlines()]
+        raw_pages.append([line for line in lines if line])
+
+    headers = running_headers(raw_pages)
     sections: list[Section] = []
 
-    for page_no, page in enumerate(extract_pdfium(path), start=1):
-        lines = [re.sub(r"\s+", " ", line).strip() for line in page.splitlines()]
-        lines = [line for line in lines if line]
-        if not lines:
+    for page_no, lines in enumerate(raw_pages, start=1):
+        # 머리글·쪽번호를 걷어내고 남은 첫 줄이 그 장의 제목이다
+        meaningful = [ln for ln in lines if ln not in headers and not re.fullmatch(r"[\d\-·.]{1,4}", ln)]
+        if not meaningful:
             continue
 
-        title, rest = lines[0], lines[1:]
+        # 로마숫자·장번호만 있는 줄은 제목이 아니다. 뒤에 붙은 실제 제목을 찾는다.
+        title_at = 0
+        while title_at < len(meaningful) - 1 and NOT_A_TITLE_RE.fullmatch(meaningful[title_at]):
+            title_at += 1
+
+        title, rest = meaningful[title_at], meaningful[:title_at] + meaningful[title_at + 1 :]
         body = "\n".join([f"<!-- page {page_no} -->", *rest])
 
         if sections and sections[-1].title == title:
@@ -178,6 +212,54 @@ def extract_pdf(path: Path) -> list[Section]:
         else:
             sections.append(Section(title, body))
 
+    return sections
+
+
+# 운영 자료에는 담당자 이름·연락처가 섞여 있다. content/ 는 git 추적 대상이므로
+# **출력 직전에 일괄 마스킹**한다. 추출기별로 처리하면 새 형식을 추가할 때 빠뜨린다.
+NAME_WITH_TITLE_RE = re.compile(r"[가-힣]{2,4}\s*(주임|대리|과장|차장|부장|팀장|사원|매니저|강사)")
+PHONE_RE = re.compile(r"01[016-9][-.\s]?\d{3,4}[-.\s]?\d{4}")
+TEL_RE = re.compile(r"0\d{1,2}[-.\s]\d{3,4}[-.\s]\d{4}")
+EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+")
+
+
+def scrub(text: str) -> str:
+    text = EMAIL_RE.sub("[이메일]", text)
+    text = PHONE_RE.sub("[연락처]", text)
+    text = TEL_RE.sub("[연락처]", text)
+    return NAME_WITH_TITLE_RE.sub("[담당자]", text)
+
+
+def extract_txt(path: Path) -> list[Section]:
+    """안내 메일 등 평문. `■` 로 시작하는 줄을 절 제목으로 본다."""
+    text = path.read_text(encoding="utf-8", errors="replace")
+    paragraphs = [re.sub(r"\s+", " ", line).strip() for line in text.splitlines()]
+    paragraphs = [p for p in paragraphs if p]
+    return group_by_heading(paragraphs, re.compile(r"^■\s*()(.+)$"))
+
+
+# 명단·연락처가 담긴 시트는 읽지 않는다
+PII_SHEET_WORDS = ("명단", "연락처", "선발", "참석", "수강생", "교육생")
+
+
+def extract_xlsx(path: Path) -> list[Section]:
+    """운영 안내 문구가 담긴 시트만 읽는다. 개인 명단 시트는 건너뛴다."""
+    from openpyxl import load_workbook
+
+    sections: list[Section] = []
+    wb = load_workbook(path, read_only=True, data_only=True)
+    for ws in wb.worksheets:
+        if any(word in ws.title for word in PII_SHEET_WORDS):
+            continue
+
+        rows = []
+        for row in ws.iter_rows(values_only=True):
+            cells = [re.sub(r"\s+", " ", str(c)).strip() for c in row if c is not None]
+            if cells:
+                rows.append(" | ".join(cells))
+        if rows:
+            sections.append(Section(ws.title, "\n".join(rows)))
+    wb.close()
     return sections
 
 
@@ -203,27 +285,42 @@ def render(doc: Document) -> str:
         used[anchor] = used.get(anchor, 0) + 1
         if used[anchor] > 1:
             anchor = f"{anchor}-{used[anchor]}"
-        out += [f"## [{anchor}] {section.title}", "", section.body.strip(), ""]
+        out += [f"## [{anchor}] {scrub(section.title)}", "", scrub(section.body).strip(), ""]
     return "\n".join(out).rstrip() + "\n"
 
 
-def build() -> list[Document]:
-    guide_html = next(RAW.glob("pkg/*/*.html"))
+def find(pattern: str) -> Path | None:
+    return next(iter(sorted(RAW.rglob(pattern))), None)
 
-    docs = [
-        Document("준비안내", RAW / "2026년_AI챔피언_자기주도형_수행평가_준비안내.hwpx", []),
-        Document("셀프학습가이드", guide_html, []),
-        Document("CBT가이드", RAW / "CBT_가이드.pdf", []),
+
+def build() -> list[Document]:
+    candidates = [
+        ("준비안내", RAW / "2026년_AI챔피언_자기주도형_수행평가_준비안내.hwpx"),
+        ("셀프학습가이드", find("pkg/*/*.html")),
+        ("CBT가이드", RAW / "CBT_가이드.pdf"),
+        ("종합안내서", RAW / "교육과정_종합안내서_V1.3.pdf"),
+        ("비대면교육사전안내", find("*비대면 교육 사전 안내*.pdf")),
+        ("보조강사FAQ", find("*보조강사FAQ.xlsx")),
+        ("운영준비체크리스트", find("*운영 준비 체크리스트.xlsx")),
+        ("강사안내메일", find("*AI 리터러시와 업무활용 보조강사 안내 메일안.txt")),
     ]
 
-    for doc in docs:
-        suffix = doc.source.suffix.lower()
-        if suffix == ".hwpx":
-            doc.sections = extract_hwpx(doc.source)
-        elif suffix == ".html":
-            doc.sections = extract_html(doc.source)
-        else:
-            doc.sections = extract_pdf(doc.source)
+    extractors = {
+        ".hwpx": extract_hwpx,
+        ".html": extract_html,
+        ".pdf": extract_pdf,
+        ".txt": extract_txt,
+        ".xlsx": extract_xlsx,
+    }
+
+    docs = []
+    for slug, source in candidates:
+        if source is None or not source.is_file():
+            print(f"  건너뜀 (파일 없음): {slug}")
+            continue
+        doc = Document(slug, source, [])
+        doc.sections = extractors[source.suffix.lower()](source)
+        docs.append(doc)
 
     return docs
 
@@ -239,8 +336,8 @@ def main() -> None:
         print(f"{doc.slug:<12} 섹션 {len(doc.sections):>3}개  {size:>7,} bytes  → {path}")
 
     print(
-        "\n종합안내서(60p)는 디자인 브로슈어라 읽기 순서가 뒤엉켜 후순위입니다 "
-        "— docs/05-data-survey.md 5장."
+        "\n종합안내서(60p)는 디자인 브로슈어라 읽기 순서가 뒤엉킵니다 "
+        "— 추출 품질을 확인하고 쓸지 판단하세요 (docs/05-data-survey.md 5장)."
     )
 
 
