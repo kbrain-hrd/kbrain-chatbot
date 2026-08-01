@@ -31,6 +31,8 @@ class Finding:
     source: str
     out_path: str
     kind: str
+    subject_no: int
+    verified: bool  # 사람이 확정을 마쳤는가 (답안지에만 의미 있음)
     header_mismatch: str | None  # 폴더 경로와 문서 헤더가 어긋난 경우
     missing_numbers: list[str]  # pypdfium2 에는 있는데 pdfplumber 에 없는 숫자
     extra_numbers: list[str]  # 반대 방향 — pypdfium2 가 숫자를 병합했을 신호
@@ -44,6 +46,13 @@ class Finding:
             and not self.extra_numbers
             and self.line_delta == 0
         )
+
+
+def is_verified(path: Path) -> bool:
+    """사람이 확정을 마친 파일인지. 프론트매터의 verified 플래그로 판단한다."""
+    if not path.is_file():
+        return False
+    return "verified: true" in path.read_text(encoding="utf-8")[:600]
 
 
 def normalize_lines(pages: list[str]) -> list[str]:
@@ -166,15 +175,22 @@ def convert_one(unit: Unit, kind: str, source: Path) -> Finding:
 
     out_path = unit.out_dir / f"{kind}.md"
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(
-        to_markdown(unit, kind, source, pdfium_pages, plumber_pages, agree=not (missing or extra)),
-        encoding="utf-8",
-    )
+
+    # 사람이 원본과 대조해 확정한 답안지는 덮어쓰지 않는다.
+    # 확정 작업이 재실행 한 번에 날아가면 아무도 확정하지 않게 된다.
+    verified = is_verified(out_path)
+    if not verified:
+        out_path.write_text(
+            to_markdown(unit, kind, source, pdfium_pages, plumber_pages, agree=not (missing or extra)),
+            encoding="utf-8",
+        )
 
     return Finding(
         source=source.as_posix(),
         out_path=out_path.as_posix(),
         kind=kind,
+        subject_no=unit.subject_no,
+        verified=verified,
         header_mismatch=check_header(unit, pdfium_pages),
         missing_numbers=missing,
         extra_numbers=extra,
@@ -187,7 +203,9 @@ def render_report(findings: list[Finding], unit_count: int) -> str:
     pdfium_suspect = [f for f in findings if f.extra_numbers]
     plumber_missing = [f for f in findings if f.missing_numbers and not f.extra_numbers]
     line_issues = [f for f in findings if f.line_delta != 0 and not (f.missing_numbers or f.extra_numbers)]
-    answer_sheets = [f for f in findings if f.kind == "answers"]
+    # 3과목은 단답 정답이 없는 산출물 평가라 답안지가 채점 루브릭이다. 확정 대상이 아니다.
+    answer_sheets = [f for f in findings if f.kind == "answers" and f.subject_no != 3]
+    unverified = [f for f in answer_sheets if not f.verified]
 
     out = [
         "# 인제스트 대조 리포트",
@@ -207,7 +225,8 @@ def render_report(findings: list[Finding], unit_count: int) -> str:
         f"- **기준 추출기(pypdfium2) 손상 의심: {len(pdfium_suspect)}건** ← 가장 먼저 볼 것",
         f"- pdfplumber 숫자 누락: {len(plumber_missing)}건",
         f"- 숫자는 같으나 라인 수가 다름: {len(line_issues)}건",
-        f"- 미확정 답안지: {len(answer_sheets)}개 (전부 `verified: false`)",
+        f"- 답안지 확정: {len(answer_sheets) - len(unverified)}/{len(answer_sheets)}개 "
+        f"(1·2과목만 — 3과목은 단답 없는 산출물 평가라 확정 대상 아님)",
         "",
     ]
 
