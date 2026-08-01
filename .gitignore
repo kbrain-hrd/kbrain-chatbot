@@ -13,3 +13,8 @@ eval/goldset-candidates.md
 
 # 초안 검수 리포트 — 질문 원문 포함이라 원격에 올리지 않는다.
 eval/draft-review*.md
+
+# 외부 스킬 설치물 — node_modules 와 같은 성격이라 추적하지 않는다.
+# skills-lock.json 으로 재설치 가능.
+.agents/
+.claude/
