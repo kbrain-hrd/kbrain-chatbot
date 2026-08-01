@@ -264,12 +264,22 @@ def suspect_questions(questions: list[Question]) -> list[tuple[str, str]]:
     return suspects
 
 
+# 운영 질문에 자주 등장하는 말. 섹션 제목만으로는 안에 무엇이 있는지 알기 어려운 문서가
+# 있어(종합안내서의 "III AI 챔피언" 등) 본문에서 이 낱말들을 찾아 카탈로그에 함께 싣는다.
+OPS_KEYWORDS = (
+    "수료", "선발", "합격", "75점", "재응시", "인증서", "일정", "신청", "응시",
+    "CBT", "웹캠", "신분증", "이러닝", "그린", "블루", "배점", "채점", "제출",
+    "준비물", "환경", "자격", "가점", "결시",
+)
+
+
 @dataclass(frozen=True)
 class OpsSection:
     anchor: str
     doc: str
     title: str
     length: int  # 본문 길이 — 조회 비용 가늠용
+    keywords: str  # 본문에 나타난 운영 핵심어
 
 
 def collect_operations() -> list[OpsSection]:
@@ -286,7 +296,10 @@ def collect_operations() -> list[OpsSection]:
         for order, (index, match) in enumerate(starts):
             end = starts[order + 1][0] if order + 1 < len(starts) else len(lines)
             body = "\n".join(lines[index + 1 : end]).strip()
-            sections.append(OpsSection(match.group(1), doc, match.group(2).strip(), len(body)))
+            found = [word for word in OPS_KEYWORDS if word in body]
+            sections.append(
+                OpsSection(match.group(1), doc, match.group(2).strip(), len(body), " · ".join(found))
+            )
     return sections
 
 
@@ -357,19 +370,24 @@ def render(questions: list[Question], ops: list[OpsSection]) -> str:
         "운영 질문(신청 방법·응시 환경·합격 기준·일정 등)의 근거다. 문항 구조가 없어 **섹션 단위**로 특정한다.",
         "본문 길이는 조회 비용 가늠용이며, 긴 섹션은 통째로 싣기 전에 필요한 부분을 확인하세요.",
         "",
-        "**FAQ가 가장 밀도 높다** — `OPS-셀프학습가이드-부록2인증평가FAQ수행평가관련자주묻는질문` 에",
-        "인증 방식·합격 기준(75점)·CBT 진행·평가 일정·재응시·인증서 발급·문의처가 모두 들어 있다.",
+        "**어디를 먼저 볼지**:",
         "",
-        "| 앵커 | 문서 | 섹션 | 본문 길이 |",
-        "|---|---|---|---|",
+        "- **FAQ** `OPS-셀프학습가이드-부록2인증평가FAQ수행평가관련자주묻는질문` — 인증 방식·합격 기준(75점)·",
+        "  CBT 진행·평가 일정·재응시·인증서 발급·문의처가 한곳에. 가장 밀도가 높다.",
+        "- **종합안내서 `III AI 챔피언`** — 선발·수료 기준, 그린/블루 과정 구성. 사실상 운영 답지다.",
+        "  제목이 로마숫자라 내용을 짐작하기 어려우니 아래 핵심어를 보고 고를 것.",
+        "- **준비안내 · CBT가이드** — 응시 환경·준비물·접속 절차. 제목이 명확해 바로 찾을 수 있다.",
+        "",
+        "섹션 제목이 불친절한 문서가 있어 본문의 핵심어를 함께 싣는다. 제목이 아니라 **핵심어로 고르면 된다.**",
+        "",
+        "| 앵커 | 문서 | 섹션 | 길이 | 핵심어 |",
+        "|---|---|---|---|---|",
     ]
     for section in ops:
-        out.append(f"| `{section.anchor}` | {section.doc} | {section.title} | {section.length:,} |")
-    out += [
-        "",
-        "**미수록:** 교육과정 종합안내서(60p)는 디자인 브로슈어라 읽기 순서가 뒤엉켜 후순위입니다",
-        "— `docs/05-data-survey.md` 5장.",
-    ]
+        out.append(
+            f"| `{section.anchor}` | {section.doc} | {section.title} | "
+            f"{section.length:,} | {section.keywords or '-'} |"
+        )
 
     return "\n".join(out).rstrip() + "\n"
 
