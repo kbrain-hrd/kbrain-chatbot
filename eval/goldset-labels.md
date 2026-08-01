@@ -29,26 +29,26 @@
 
 | qid | 시트 등급 | category | anchor | action | flag | 요지 |
 |---|---|---|---|---|---|---|
-| `cb53c7b1` | green | 문항 | `?-S02-M03` | ask_grade | 3과목 | 2세트 3과목 json 제출 범위 |
-| `e49f5c1b` | green | 문항 | `?-S03-M03` | ask_grade | 3과목·오류제기 | 본문 필터링인데 정답은 본문/제목 |
+| `cb53c7b1` | green | 문항 | `?-S02-M03` | escalate | 3과목 | 2세트 3과목 json 제출 범위 |
+| `e49f5c1b` | green | 문항 | `?-S03-M03` | escalate | 3과목·오류제기 | 본문 필터링인데 정답은 본문/제목 |
 | `c1e550c5` | green | 문항 | `?-S03-M02` | ask_grade | - | 제출파일 1개인지 2개인지 |
 | `180d4f5d` | green | 문항 | `?-S01-M02` | ask_grade | 검수전 | 총인구수 정렬 오류 (현재 자료는 수정됨) |
-| `d191abb1` | green | 문항 | `?-S05-M01-Q02` | ask_grade | 공식정답오류 | 불일치 사실 수 5 vs 10 |
+| `d191abb1` | green | 문항 | `?-S05-M01-Q02` | escalate | 공식정답오류 | 불일치 사실 수 5 vs 10 |
 | `42eea86c` | green | 문항 | `G-S03-M02` | answer | 검수전 | 컬럼명 불일치 (등급 명시됨) |
-| `b63da81b` | green | 문항 | `?-S02-M03` | ask_grade | 3과목 | UI/UX가 채점 대상인지 |
-| `20f3f282` | green | 문항 | `?-S03-M03` | ask_grade | 3과목 | json 파일 포함 여부 |
+| `b63da81b` | green | 문항 | `?-S02-M03` | escalate | 3과목 | UI/UX가 채점 대상인지 |
+| `20f3f282` | green | 문항 | `?-S03-M03` | escalate | 3과목 | json 파일 포함 여부 |
 | `f558fdbe` | green | 문항 | `?-S03-M02` | ask_grade | 검수전 | 컬럼·빈 셀 확인 요청 |
-| `0cd41409` | green | 문항 | `?-S03-M03` | ask_grade | 3과목·오류제기 | 해설 결과 수 10 vs 8 |
+| `0cd41409` | green | 문항 | `?-S03-M03` | escalate | 3과목·오류제기 | 해설 결과 수 10 vs 8 |
 | `aa25150f` | green | 문항 | `?-S05-M02` | ask_grade | - | 빈 셀이 없어 보임 |
 | `ed5e2d32` | green | 운영 | - | escalate | 재분류 | 배포 플랫폼(cdsa.site) 허용 여부 — 제출 규정 |
 | `3fe8924b` | green | 문항 | `?-S01-M02` | ask_grade | 검수전 | 총인구수 정렬 오류 (재질문) |
-| `dd6088d0` | green | 문항 | `?-S03-M02` | ask_grade | 오류제기 | 답안지·해설지 표기 오류 |
+| `dd6088d0` | green | 문항 | `?-S03-M02` | escalate | 오류제기 | 답안지·해설지 표기 오류 |
 | `c9718141` | blue | 문항 | `?-S05-M01` | ask_grade | - | 첨부 파일 누락 여부 |
 | `0886208c` | blue | 문항 | - | escalate | 3과목·세트불명 | 구현 메모 의미 + rss 링크 감점 |
-| `2fd2bc4b` | blue | 운영 | - | escalate | 재분류 | 보안서약서 AI 사용 규정 해석 |
-| `6e67e5f2` | blue | 운영 | - | escalate | 재분류 | 시험 구성·웹캠 요건 |
+| `2fd2bc4b` | blue | 운영 | - | answer | 재분류 | 보안서약서 AI 사용 규정 해석 |
+| `6e67e5f2` | blue | 운영 | - | answer | 재분류 | 시험 구성·웹캠 요건 |
 | `ecd239d1` | blue | 문항 | `?-S01-M01` | ask_grade | - | 본문 길이 라운드 처리 기준 |
-| `72b4f69e` | blue | 문항 | `?-S01-M03` | ask_grade | 3과목 | 외부 리소스 구성 방식 |
+| `72b4f69e` | blue | 문항 | `?-S01-M03` | escalate | 3과목 | 외부 리소스 구성 방식 |
 | `9178b50b` | blue | 문항 | `?-S01-M02` | ask_grade | - | 부패위험 컬럼이 CSV에 없음 |
 | `2c3dd3fd` | blue | 문항 | - | escalate | 3과목·세트불명 | 제출물.md 배점·제출 여부 |
 | `e9441248` | blue | 문항 | - | escalate | 3과목·세트불명 | 구현 메모에 무엇을 쓰는지 |
@@ -62,9 +62,9 @@
 | 총 | 25 |
 | 문항 | 22 |
 | 운영 | 3 |
-| `ask_grade` | 17 |
-| `escalate` | 6 |
-| `answer` | 2 |
+| `escalate` | 12 |
+| `ask_grade` | 9 |
+| `answer` | 4 |
 
 **측정에서 제외할 건:** `검수전` 4건 — 질문 시점 자료가 현재와 달라 정확도를 왜곡한다.
 → 유효 측정 대상 **21건**.
