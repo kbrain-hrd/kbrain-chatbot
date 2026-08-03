@@ -23,7 +23,7 @@ from pydantic import BaseModel
 
 from backend.answer.classify import build_client, classify, load_catalog
 from backend.answer.draft import load_materials, make_draft
-from backend.search.index import OpsIndex, build_index
+from backend.search.index import HybridIndex, build_hybrid_index
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -31,7 +31,7 @@ app = FastAPI(title="셀프스터디 문의 대응")
 
 _client: anthropic.Anthropic | None = None
 _catalog: str = ""
-_index: OpsIndex | None = None
+_index: HybridIndex | None = None
 
 
 def client() -> anthropic.Anthropic:
@@ -40,8 +40,18 @@ def client() -> anthropic.Anthropic:
         _client = build_client()
         _catalog = load_catalog()
         # 운영 섹션 색인. 파일로 떨구지 않고 기동 시 메모리에 세운다.
-        _index = build_index()
+        _index = build_hybrid_index()
     return _client
+
+
+@app.on_event("startup")
+def warm_up() -> None:
+    """색인을 미리 세운다.
+
+    임베딩 모델 로딩과 289청크 인코딩에 30초쯤 걸린다. 첫 요청 때 하면 **통화 중인
+    담당자가 그 30초를 기다리게 된다** — 유선 응대는 응답 시간이 제약이다.
+    """
+    client()
 
 
 class AskRequest(BaseModel):

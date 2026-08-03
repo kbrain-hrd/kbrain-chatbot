@@ -50,6 +50,57 @@ def tokenize(text: str) -> list[str]:
     return tokens
 
 
+# 섹션 길이 편차가 크다 — 문의FAQ 는 중앙값 94자인데 셀프학습가이드 "실전처럼 연습하기"는
+# 20,040자다. 긴 섹션을 통째로 한 단위로 다루면 임베딩에서 의미가 뭉개지고 BM25 에서도
+# 길이 정규화에 눌린다. **색인에서만 잘게 나누고 앵커는 섹션 그대로 돌려준다** —
+# 마크다운을 쪼개면 앵커가 바뀌어 골드셋 레이블과 문서 참조가 깨진다.
+CHUNK_SIZE = 600
+CHUNK_OVERLAP = 120
+
+SENTENCE_END_RE = re.compile(r"(?<=[.!?다요])\s+")
+
+
+def chunk_body(body: str, size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
+    """문단 → 문장 순으로 경계를 찾아 자른다. 경계가 없으면 그때만 강제로 끊는다."""
+    if len(body) <= size:
+        return [body] if body.strip() else []
+
+    pieces: list[str] = []
+    for paragraph in body.split("\n\n"):
+        if len(paragraph) <= size:
+            pieces.append(paragraph)
+            continue
+        sentence = ""
+        for part in SENTENCE_END_RE.split(paragraph):
+            if len(sentence) + len(part) > size and sentence:
+                pieces.append(sentence)
+                sentence = part
+            else:
+                sentence = f"{sentence} {part}".strip()
+        if sentence:
+            pieces.append(sentence)
+
+    chunks: list[str] = []
+    current = ""
+    for piece in pieces:
+        if len(current) + len(piece) > size and current:
+            chunks.append(current)
+            current = current[-overlap:] + "\n" + piece if overlap else piece
+        else:
+            current = f"{current}\n{piece}".strip()
+    if current.strip():
+        chunks.append(current)
+
+    # 경계가 전혀 없는 덩어리(표가 한 줄로 눌린 경우 등)는 여기서 잘린다
+    final: list[str] = []
+    for chunk in chunks:
+        while len(chunk) > size * 2:
+            final.append(chunk[: size * 2])
+            chunk = chunk[size * 2 - overlap :]
+        final.append(chunk)
+    return [c for c in final if c.strip()]
+
+
 @dataclass
 class Hit:
     section: OpsSection
@@ -94,13 +145,61 @@ def build_index() -> OpsIndex:
     return OpsIndex(collect_operations())
 
 
+# RRF 표준값. 점수를 직접 더하지 않고 **순위**로 융합하는 이유는 두 점수의 스케일이
+# 다르기 때문이다 — BM25 는 상한이 없고 코사인은 -1~1 이라, 정규화 없이 더하면 한쪽이 먹는다.
+RRF_K = 60
+
+# 융합 전에 각 검색기에서 뽑아 둘 후보 수. 최종 top-12 보다 넉넉해야 한쪽에서만
+# 상위인 문서가 살아남는다.
+FUSION_POOL = 30
+
+
+class HybridIndex:
+    """BM25(낱말 일치) + 의미 검색을 순위로 융합한다.
+
+    한쪽만 쓰지 않는 이유는 서로 못 하는 일이 다르기 때문이다. 의미 검색은
+    "떨어지면 다시" ↔ "재응시" 를 잇지만 `cdsa.site` 같은 고유 문자열에는 약하다.
+    BM25 는 그 반대다.
+    """
+
+    def __init__(self, lexical: OpsIndex, dense: object, k: int = RRF_K) -> None:
+        self.lexical = lexical
+        self.dense = dense
+        self.k = k
+        self.sections = lexical.sections
+
+    def search(self, query: str, top_n: int = 5) -> list[Hit]:
+        fused: dict[str, float] = {}
+        found: dict[str, OpsSection] = {}
+        for engine in (self.lexical, self.dense):
+            for rank, hit in enumerate(engine.search(query, top_n=FUSION_POOL), start=1):
+                anchor = hit.section.anchor
+                fused[anchor] = fused.get(anchor, 0.0) + 1 / (self.k + rank)
+                found[anchor] = hit.section
+
+        ranked = sorted(fused.items(), key=lambda kv: kv[1], reverse=True)
+        return [Hit(found[anchor], score) for anchor, score in ranked[:top_n]]
+
+
+def build_hybrid_index() -> HybridIndex:
+    """기본 검색기. 의미 검색 모델을 함께 올린다."""
+    from backend.search.dense import DenseIndex
+
+    sections = collect_operations()
+    return HybridIndex(OpsIndex(sections), DenseIndex(sections))
+
+
 def render_hits(hits: list[Hit]) -> str:
     """판정 프롬프트에 실을 표. 카탈로그의 운영 표와 같은 열을 쓴다."""
     out = [
-        "## 운영 자료 (질문과 관련된 섹션만)",
+        "## 운영 자료 (질문으로 검색한 결과)",
         "",
-        "운영 섹션 전체가 아니라 **이 질문에 관련된 것만** 골라 실었다.",
-        "여기에 근거가 없으면 다른 운영 섹션에도 없다고 보고 `escalate` 하라.",
+        "**검색 결과일 뿐이라 질문과 무관한 항목이 섞여 있다.** 검색은 관련이 없어도 언제나",
+        "무언가를 돌려주므로, 제목이 그럴듯하다는 이유로 고르지 마라.",
+        "",
+        "- 질문이 **특정 세트·과목·문항을 지목하면**, 이 목록에 무엇이 있든 `문항` 이다",
+        "- 이 목록에 질문의 근거가 **실제로** 있을 때만 `운영` 으로 판정한다",
+        "- 근거가 없으면 다른 운영 섹션에도 없다고 보고 `escalate` 하라",
         "",
         "| 앵커 | 문서 | 섹션 | 핵심어 |",
         "|---|---|---|---|",

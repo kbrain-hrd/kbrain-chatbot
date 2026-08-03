@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from backend.answer.classify import build_client, classify, load_catalog
-from backend.search.index import build_index
+from backend.search.index import build_hybrid_index
 from backend.answer.draft import Draft, load_materials, make_draft
 from backend.sheets.extract import Entry, read_entries
 from backend.sheets.goldset import classify as rule_classify
@@ -130,7 +130,7 @@ def main() -> None:
 
     client = build_client()
     catalog = load_catalog()
-    ops_index = build_index()
+    ops_index = build_hybrid_index()
     entries = collect_questions()
 
     # 크레딧을 예고 없이 태우지 않도록 상한을 먼저 밝힌다.
