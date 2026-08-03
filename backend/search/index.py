@@ -105,6 +105,9 @@ def chunk_body(body: str, size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) 
 class Hit:
     section: OpsSection
     score: float
+    # 질문과 가장 잘 맞은 대목. 제목만 보여 주면 고를 수 없다 — 검색은 본문으로 하는데
+    # 판정 모델에게는 제목만 주면, 본문에 답이 있는 섹션 대신 제목이 그럴듯한 섹션을 고른다.
+    snippet: str = ""
 
 
 class OpsIndex:
@@ -153,6 +156,10 @@ RRF_K = 60
 # 상위인 문서가 살아남는다.
 FUSION_POOL = 30
 
+# 발췌 길이. top-5 × 260자면 판정 프롬프트가 약 1.1K 토큰 늘지만, 이것이 없으면
+# 모델이 제목만 보고 고르게 되어 검색이 1위로 올려 준 섹션을 놓친다.
+SNIPPET_CHARS = 260
+
 
 class HybridIndex:
     """BM25(낱말 일치) + 의미 검색을 순위로 융합한다.
@@ -171,14 +178,22 @@ class HybridIndex:
     def search(self, query: str, top_n: int = 5) -> list[Hit]:
         fused: dict[str, float] = {}
         found: dict[str, OpsSection] = {}
+        snippets: dict[str, str] = {}
         for engine in (self.lexical, self.dense):
             for rank, hit in enumerate(engine.search(query, top_n=FUSION_POOL), start=1):
                 anchor = hit.section.anchor
                 fused[anchor] = fused.get(anchor, 0.0) + 1 / (self.k + rank)
                 found[anchor] = hit.section
+                # 스니펫은 의미 검색 쪽만 만든다(청크 단위라서). BM25 만 걸린 섹션은
+                # 본문 앞부분으로 대신한다.
+                if hit.snippet:
+                    snippets[anchor] = hit.snippet
 
         ranked = sorted(fused.items(), key=lambda kv: kv[1], reverse=True)
-        return [Hit(found[anchor], score) for anchor, score in ranked[:top_n]]
+        return [
+            Hit(found[anchor], score, snippets.get(anchor) or found[anchor].body[:SNIPPET_CHARS])
+            for anchor, score in ranked[:top_n]
+        ]
 
 
 def build_hybrid_index() -> HybridIndex:
@@ -190,23 +205,32 @@ def build_hybrid_index() -> HybridIndex:
 
 
 def render_hits(hits: list[Hit]) -> str:
-    """판정 프롬프트에 실을 표. 카탈로그의 운영 표와 같은 열을 쓴다."""
+    """판정 프롬프트에 실을 검색 결과.
+
+    표가 아니라 목록으로 싣고 **본문 발췌를 함께 준다.** 제목만 주면 본문에 답이 있는
+    섹션 대신 제목이 구체적인 섹션을 고른다 — 실제로 "모니터 복제도 금지"가 적힌
+    `운영진확인사항-응시환경`(검색 1위)을 두고 제목이 그럴듯한 CBT가이드를 골랐다.
+    """
     out = [
-        "## 운영 자료 (질문으로 검색한 결과)",
+        "## 운영 자료 (질문으로 검색한 결과, 관련도 순)",
         "",
         "**검색 결과일 뿐이라 질문과 무관한 항목이 섞여 있다.** 검색은 관련이 없어도 언제나",
         "무언가를 돌려주므로, 제목이 그럴듯하다는 이유로 고르지 마라.",
         "",
+        "- **발췌를 보고 고르라.** 제목이 덜 구체적이어도 발췌에 답이 있으면 그쪽이다",
         "- 질문이 **특정 세트·과목·문항을 지목하면**, 이 목록에 무엇이 있든 `문항` 이다",
         "- 이 목록에 질문의 근거가 **실제로** 있을 때만 `운영` 으로 판정한다",
         "- 근거가 없으면 다른 운영 섹션에도 없다고 보고 `escalate` 하라",
+        "- `운영진확인사항` 은 운영 담당자가 직접 확인해 준 문서다. **다른 자료와 어긋나면 이쪽이 맞다**",
         "",
-        "| 앵커 | 문서 | 섹션 | 핵심어 |",
-        "|---|---|---|---|",
     ]
-    for hit in hits:
+    for rank, hit in enumerate(hits, start=1):
         section = hit.section
-        out.append(f"| `{section.anchor}` | {section.doc} | {section.title} | {section.keywords or '-'} |")
+        excerpt = re.sub(r"\s+", " ", hit.snippet).strip()[:SNIPPET_CHARS]
+        out += [
+            f"{rank}. `{section.anchor}` — {section.doc} / {section.title}",
+            f"   발췌: {excerpt}",
+        ]
     return "\n".join(out)
 
 

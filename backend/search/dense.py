@@ -36,11 +36,13 @@ class DenseIndex:
         self.model = SentenceTransformer(model_name)
 
         self.owners: list[int] = []
+        self.chunks: list[str] = []
         passages: list[str] = []
         for index, section in enumerate(sections):
             # 제목은 FAQ 에서 곧 질문이라 청크마다 붙여 문맥을 잃지 않게 한다.
             for chunk in chunk_body(section.body) or [section.title]:
                 self.owners.append(index)
+                self.chunks.append(chunk)
                 passages.append(f"{PASSAGE_PREFIX}{section.title}\n{chunk}")
 
         self.vectors = self.model.encode(
@@ -53,15 +55,16 @@ class DenseIndex:
         )[0]
         scores = self.vectors @ vector
 
-        # 한 섹션이 여러 청크로 쪼개져 있다. 가장 잘 맞은 청크 점수를 그 섹션의 점수로 본다.
-        best: dict[int, float] = {}
-        for owner, score in zip(self.owners, scores):
+        # 한 섹션이 여러 청크로 쪼개져 있다. 가장 잘 맞은 청크 점수를 그 섹션의 점수로 보고,
+        # 그 청크를 스니펫으로 함께 돌려준다 — 판정 모델이 내용을 보고 고를 수 있어야 한다.
+        best: dict[int, tuple[float, str]] = {}
+        for position, (owner, score) in enumerate(zip(self.owners, scores)):
             value = float(score)
-            if value > best.get(owner, float("-inf")):
-                best[owner] = value
+            if value > best.get(owner, (float("-inf"), ""))[0]:
+                best[owner] = (value, self.chunks[position])
 
-        ranked = sorted(best.items(), key=lambda kv: kv[1], reverse=True)
-        return [Hit(self.sections[index], score) for index, score in ranked[:top_n]]
+        ranked = sorted(best.items(), key=lambda kv: kv[1][0], reverse=True)
+        return [Hit(self.sections[i], score, snippet) for i, (score, snippet) in ranked[:top_n]]
 
 
 def build_dense_index() -> DenseIndex:
