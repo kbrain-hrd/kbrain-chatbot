@@ -31,6 +31,7 @@ from backend.answer.classify import build_client, classify, load_catalog
 from backend.answer.draft import load_materials, make_draft
 from backend.search.index import HybridIndex, build_hybrid_index
 from backend.sheets.client import (
+    STATUS_HOLD,
     STATUS_REVIEW,
     Sheet,
     is_pending,
@@ -196,11 +197,18 @@ def run_once(
             print(f"  {row_number}행 슬랙 발송 실패 ({type(exc).__name__}: {exc}) — 다음 폴링에서 재시도")
             continue
 
-        sheet.write(row_number, {"status": STATUS_REVIEW})
+        # 초안이 있으면 검수할 것이 있으니 `검수대기`, 없으면 사람이 직접 써야 하니
+        # `답변대기` 다. 초안 없는 건을 검수대기로 두면 담당자가 슬랙에서 승인하려다
+        # 누를 버튼이 없는 것을 보게 된다.
+        status = STATUS_REVIEW if result.draft else STATUS_HOLD
+        sheet.write(row_number, {"status": status})
         done += 1
         mark = "초안" if result.draft else "판정만"
         sent = "카드 발송" if posted else "슬랙 미설정"
-        print(f"  {row_number}행 → {result.category} · {mark} · {result.flags or '플래그 없음'} · {sent}")
+        print(
+            f"  {row_number}행 → {result.category} · {mark} · "
+            f"{result.flags or '플래그 없음'} · {status} · {sent}"
+        )
 
     return done
 

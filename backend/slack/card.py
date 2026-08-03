@@ -83,21 +83,27 @@ def build(
     """초안 카드 블록. 초안이 없으면 승인할 것이 없으므로 버튼을 달지 않는다."""
     key = row_key(row_number, question)
 
+    # 분류·플래그는 라벨을 붙여 한 줄에 모은다. 제목의 대괄호나 ⚠️ 만으로는
+    # 그것이 무엇인지 알 수 없다 — 시트에서 뺀 컬럼이라 카드가 유일한 표시 자리다.
     blocks: list[dict] = [
         {
             "type": "header",
-            "text": {"type": "plain_text", "text": f"[{category}] 검수 요청 · {row_number}행"},
+            "text": {"type": "plain_text", "text": f"검수 요청 · {row_number}행"},
+        },
+        {
+            "type": "context",
+            "elements": [
+                {
+                    "type": "mrkdwn",
+                    "text": f"*분류* {category or '-'}   ·   *플래그* {flags or '없음'}",
+                }
+            ],
         },
         {
             "type": "section",
             "text": {"type": "mrkdwn", "text": f"*질문*\n{clip(question, 1000)}"},
         },
     ]
-
-    if flags:
-        blocks.append(
-            {"type": "context", "elements": [{"type": "mrkdwn", "text": f"⚠️ {flags}"}]}
-        )
 
     if draft:
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*초안*"}})
@@ -159,8 +165,25 @@ def build(
 
 
 def result_blocks(blocks: list[dict], note: str) -> list[dict]:
-    """처리 후 카드 — 버튼을 떼고 결과 한 줄을 붙인다. 같은 카드를 두 번 누르지 못하게 한다."""
-    kept = [block for block in blocks if block.get("type") != "actions"]
+    """처리 후 카드 — 결과 한 줄을 붙이고 같은 카드를 두 번 누르지 못하게 한다.
+
+    **`시트에서 보기` 링크는 남긴다.** 처음에는 `actions` 블록을 통째로 지웠는데, 그러면
+    처리한 뒤 결과를 확인하러 갈 길이 없어진다. 막아야 하는 것은 승인·수정·보류를
+    다시 누르는 것뿐이다.
+    """
+    kept: list[dict] = []
+    for block in blocks:
+        if block.get("type") != "actions":
+            kept.append(block)
+            continue
+        links = [
+            element
+            for element in block.get("elements", [])
+            if element.get("action_id") == "open_sheet"
+        ]
+        if links:
+            kept.append({**block, "elements": links})
+
     return [*kept, {"type": "context", "elements": [{"type": "mrkdwn", "text": note}]}]
 
 
