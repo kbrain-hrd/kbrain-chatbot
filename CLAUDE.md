@@ -4,9 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 현재 상태
 
-**로드맵 1단계 진행 중** — PDF 90개 → 마크다운 변환과 추출기 대조까지 완료했고,
-남은 것은 사람이 원본과 확인하는 작업입니다 (답안지 30개 확정, 라인 차이 35건 표본 확인).
-`backend/ingest/` 외의 코드는 아직 없습니다.
+**로드맵 7단계까지 구현 완료.** 두 유입 경로가 모두 왕복 동작합니다 —
+유선(웹 UI)과 시트(폴링 → 슬랙 승인 → 시트 등록).
+
+남은 것은 **사람이 하는 검수**입니다: 답안지 30개 확정, 라인 차이 35건 표본 확인(1단계),
+초안 32건 검수(4단계). 실제 운영 시트 적용 전에 `docs/04-open-questions.md` 2-9
+(원본 xlsx → 구글 시트 변환)가 해결돼야 합니다.
 
 코드를 작성하기 전에 해당 단계의 설계 문서를 먼저 읽으세요.
 설계는 이미 세 번 뒤집혔고(`docs/01-design.md` 2장), 그 이유가 문서에 남아 있습니다.
@@ -16,8 +19,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 uv sync                              # 의존성 설치 (.venv 생성)
 uv run python -m backend.ingest.convert   # 1단계: PDF → 마크다운 + 대조 리포트
+uv run uvicorn backend.web.app:app        # 5단계: 유선 대응 웹 UI
+uv run python -m backend.sheets.client    # 6단계: 시트 연결·헤더 확인 + 서식
+uv run python -m backend.sheets.poll      # 6단계: 시트 폴링 (--once 로 1회)
+uv run python -m backend.slack.app        # 7단계: 슬랙 승인 리스너
 uv add <pkg>                         # 의존성 추가
 ```
+
+시트 경로는 **폴링과 리스너를 함께 띄웁니다** — 폴링이 초안 카드를 보내고,
+리스너가 [승인]/[수정]/[보류] 버튼을 받습니다.
+`.env` 에 `SHEET_URL`·`GOOGLE_CREDENTIALS`·`SLACK_BOT_TOKEN`·`SLACK_APP_TOKEN`·`SLACK_CHANNEL` 이 필요합니다.
 
 인제스트는 **멱등**합니다 — 자료가 추가될 때마다 전체를 다시 돌리면 됩니다.
 산출물은 `content/selfstudy/`, 대조 리포트는 `eval/ingest-diff.md`.
