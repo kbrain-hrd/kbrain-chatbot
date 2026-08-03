@@ -6,211 +6,255 @@
 <title>셀프스터디 문의 대응</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Nanum+Myeongjo:wght@400;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
 <style>
   :root {
-    --bg: #080d0c;
-    --panel: #0e1614;
-    --panel-2: #131e1b;
-    --line: #1f2f2b;
-    --line-bright: #2c433d;
-    --ink: #dfe9e6;
-    --ink-dim: #7d918c;
-    --ink-faint: #4e605c;
-    --mint: #4fe0b0;
-    --amber: #e8b761;
-    --coral: #f0705f;
-    --azure: #5cb8ff;
-    --mono: "IBM Plex Mono", ui-monospace, monospace;
-    --sans: "IBM Plex Sans KR", system-ui, sans-serif;
+    --paper:      #f6f2e9;
+    --paper-2:    #fffdf8;
+    --paper-sink: #ece6d8;
+    --rule:       #d9d0bd;
+    --rule-hard:  #2b2723;
+    --ink:        #1c1a17;
+    --ink-2:      #4a453d;
+    --ink-3:      #857d70;
+    --vermilion:  #b5342a;
+    --vermilion-w:#f6e4e0;
+    --seal:       #a82c22;
+    --moss:       #3f6b4a;
+    --ochre:      #a97822;
+
+    --serif:  "Nanum Myeongjo", serif;
+    --sans:   Pretendard, system-ui, sans-serif;
+    --mono:   "IBM Plex Mono", monospace;
   }
 
   * { box-sizing: border-box; }
 
+  html { background: var(--paper); }
   body {
     margin: 0;
-    background: var(--bg);
-    color: var(--ink);
     font-family: var(--sans);
-    font-weight: 300;
-    line-height: 1.65;
-    min-height: 100vh;
+    color: var(--ink);
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
     background-image:
-      radial-gradient(ellipse 80% 50% at 50% -10%, rgba(79, 224, 176, 0.06), transparent),
-      repeating-linear-gradient(0deg, transparent 0 2px, rgba(255,255,255,0.008) 2px 4px);
+      radial-gradient(circle at 12% 8%,  rgba(181,52,42,.035), transparent 32%),
+      radial-gradient(circle at 88% 4%,  rgba(63,107,74,.03),  transparent 28%);
+    background-attachment: fixed;
   }
 
-  header {
-    border-bottom: 1px solid var(--line);
-    padding: 18px 28px;
-    display: flex;
-    align-items: baseline;
-    gap: 16px;
+  /* ── 제호 ───────────────────────────────── */
+  .masthead {
+    border-bottom: 3px double var(--rule-hard);
+    padding: 22px 40px 14px;
+    display: flex; align-items: flex-end; gap: 18px;
+    background: var(--paper-2);
   }
-  header h1 {
-    font-size: 15px; font-weight: 600; margin: 0; letter-spacing: -0.01em;
+  .masthead h1 {
+    font-family: var(--serif); font-weight: 800;
+    font-size: 26px; margin: 0; letter-spacing: -.03em;
   }
-  header .sub {
-    font-family: var(--mono); font-size: 11px; color: var(--ink-faint);
-    letter-spacing: 0.06em; text-transform: uppercase;
+  .masthead .tag {
+    font-family: var(--serif); font-size: 13px; color: var(--ink-3);
+    padding-bottom: 4px; letter-spacing: .02em;
   }
-  header .live {
-    margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--ink-faint);
-    display: flex; align-items: center; gap: 7px;
+  .masthead .rule {
+    margin-left: auto; font-family: var(--mono); font-size: 10.5px;
+    color: var(--ink-3); letter-spacing: .1em; text-transform: uppercase;
+    padding-bottom: 5px; border-bottom: 2px solid var(--vermilion);
   }
-  header .live::before {
-    content: ""; width: 6px; height: 6px; border-radius: 50%;
-    background: var(--mint); box-shadow: 0 0 8px var(--mint);
-    animation: pulse 2.4s ease-in-out infinite;
-  }
-  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.35 } }
 
-  main { max-width: 1240px; margin: 0 auto; padding: 26px 28px 80px; }
+  main { max-width: 1180px; margin: 0 auto; padding: 34px 40px 90px; }
 
-  .ask {
-    display: grid; grid-template-columns: 1fr auto; gap: 12px;
-    align-items: stretch; margin-bottom: 22px;
+  /* ── 입력 ───────────────────────────────── */
+  .ask { margin-bottom: 12px; }
+  .ask label {
+    display: block; font-family: var(--serif); font-size: 13px;
+    color: var(--ink-3); margin-bottom: 8px; letter-spacing: .04em;
   }
+  .ask .row { display: flex; gap: 0; align-items: stretch; }
   textarea {
-    width: 100%; min-height: 88px; resize: vertical;
-    background: var(--panel); color: var(--ink);
-    border: 1px solid var(--line-bright); border-radius: 3px;
-    padding: 14px 16px; font-family: var(--sans); font-size: 15px; font-weight: 300;
-    line-height: 1.6; transition: border-color .15s;
+    flex: 1; min-height: 92px; resize: vertical;
+    background: var(--paper-2); color: var(--ink);
+    border: 1.5px solid var(--rule-hard); border-right: 0;
+    padding: 16px 18px; font-family: var(--sans); font-size: 16px;
+    line-height: 1.65;
   }
-  textarea:focus { outline: none; border-color: var(--mint); }
-  textarea::placeholder { color: var(--ink-faint); }
+  textarea:focus { outline: none; background: #fff; }
+  textarea::placeholder { color: #b3aa9a; }
 
   button.go {
-    background: var(--mint); color: #04140f; border: 0; border-radius: 3px;
-    padding: 0 30px; font-family: var(--mono); font-size: 13px; font-weight: 500;
-    letter-spacing: 0.08em; cursor: pointer; transition: filter .15s;
-    text-transform: uppercase; white-space: nowrap;
+    background: var(--rule-hard); color: var(--paper);
+    border: 1.5px solid var(--rule-hard); cursor: pointer;
+    padding: 0 34px; font-family: var(--serif); font-weight: 700;
+    font-size: 16px; letter-spacing: .1em; transition: background .14s;
+    white-space: nowrap;
   }
-  button.go:hover:not(:disabled) { filter: brightness(1.12); }
-  button.go:disabled { opacity: .4; cursor: default; }
+  button.go:hover:not(:disabled) { background: var(--vermilion); border-color: var(--vermilion); }
+  button.go:disabled { opacity: .35; cursor: default; }
 
   .hint {
-    font-family: var(--mono); font-size: 11px; color: var(--ink-faint);
-    margin: -14px 0 24px;
+    font-family: var(--mono); font-size: 11px; color: var(--ink-3);
+    margin-bottom: 34px;
   }
 
-  /* 판정 배지 줄 */
+  /* ── 판정 머리글 ────────────────────────── */
   .verdict {
-    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
-    margin-bottom: 18px;
+    display: flex; flex-wrap: wrap; gap: 0; align-items: stretch;
+    border-top: 1.5px solid var(--rule-hard);
+    border-bottom: 1px solid var(--rule);
+    margin-bottom: 26px;
   }
-  .chip {
-    font-family: var(--mono); font-size: 11px; letter-spacing: .05em;
-    padding: 5px 11px; border-radius: 2px;
-    border: 1px solid var(--line-bright); color: var(--ink-dim);
-    background: var(--panel);
+  .cell {
+    padding: 9px 16px 9px 0; margin-right: 16px;
+    border-right: 1px solid var(--rule);
+    display: flex; align-items: baseline; gap: 9px;
   }
-  .chip.anchor { color: var(--mint); border-color: rgba(79,224,176,.35); }
-  .chip.high   { color: var(--mint);  border-color: rgba(79,224,176,.4); }
-  .chip.medium { color: var(--amber); border-color: rgba(232,183,97,.4); }
-  .chip.low    { color: var(--ink-dim); }
-  .chip.flag   { color: var(--coral); border-color: rgba(240,112,95,.45); }
-  .chip .k { color: var(--ink-faint); margin-right: 6px; }
+  .cell:last-child { border-right: 0; }
+  .cell .k {
+    font-family: var(--serif); font-size: 11.5px; color: var(--ink-3);
+    letter-spacing: .06em;
+  }
+  .cell .v { font-size: 14px; font-weight: 600; }
+  .cell .v.anchor { font-family: var(--mono); font-size: 13px; letter-spacing: -.02em; }
+  .v.high   { color: var(--moss); }
+  .v.medium { color: var(--ochre); }
+  .v.low    { color: var(--ink-3); }
+  .cell.flagged .v { color: var(--vermilion); }
 
-  /* 되묻기 — 주력 동작이라 화면을 지배한다 */
+  /* ── 되묻기: 지면을 지배한다 ─────────────── */
   .askback {
-    border: 1px solid rgba(92,184,255,.35);
-    background: linear-gradient(180deg, rgba(92,184,255,.09), rgba(92,184,255,.02));
-    border-radius: 4px; padding: 34px 36px; margin-bottom: 18px;
+    background: var(--paper-2);
+    border: 1.5px solid var(--rule-hard);
+    border-left: 7px solid var(--vermilion);
+    padding: 40px 46px 34px; margin-bottom: 22px;
+    position: relative;
+  }
+  .askback::after {
+    content: "確認"; position: absolute; top: 26px; right: 34px;
+    font-family: var(--serif); font-size: 15px; font-weight: 700;
+    color: var(--seal); border: 2px solid var(--seal); border-radius: 3px;
+    padding: 7px 9px; line-height: 1; opacity: .82;
+    transform: rotate(6deg);
   }
   .askback .label {
-    font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
-    color: var(--azure); text-transform: uppercase; margin-bottom: 14px;
+    font-family: var(--serif); font-size: 13px; color: var(--vermilion);
+    letter-spacing: .1em; margin-bottom: 16px;
   }
   .askback .line {
-    font-size: 27px; font-weight: 400; line-height: 1.45; letter-spacing: -0.02em;
+    font-family: var(--serif); font-weight: 700;
+    font-size: 34px; line-height: 1.42; letter-spacing: -.035em;
+    margin-bottom: 22px; max-width: 22ch;
   }
   .askback .why {
-    margin-top: 16px; padding-top: 14px; border-top: 1px solid rgba(92,184,255,.18);
-    font-size: 13px; color: var(--ink-dim);
+    border-top: 1px solid var(--rule); padding-top: 16px;
+    font-size: 14px; color: var(--ink-2); max-width: 62ch;
   }
-  .askback .why b { color: var(--ink); font-weight: 500; }
+  .askback .why b { color: var(--ink); font-weight: 700; }
+  .askback .why code {
+    font-family: var(--mono); font-size: 12.5px;
+    background: var(--paper-sink); padding: 2px 6px;
+  }
 
-  /* 사람에게 넘김 */
+  /* ── 담당자 확인 ───────────────────────── */
   .escalate {
-    border: 1px solid rgba(232,183,97,.32);
-    background: linear-gradient(180deg, rgba(232,183,97,.08), transparent);
-    border-radius: 4px; padding: 26px 30px; margin-bottom: 18px;
+    background: var(--paper-2); border: 1.5px solid var(--rule);
+    border-left: 7px solid var(--ochre);
+    padding: 30px 36px; margin-bottom: 22px;
   }
   .escalate .label {
-    font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
-    color: var(--amber); text-transform: uppercase; margin-bottom: 10px;
+    font-family: var(--serif); font-size: 13px; color: var(--ochre);
+    letter-spacing: .1em; margin-bottom: 12px;
   }
-  .escalate .line { font-size: 19px; font-weight: 400; }
-  .escalate .why { margin-top: 10px; font-size: 13px; color: var(--ink-dim); }
-
-  /* 초안 + 근거 */
-  .split { display: grid; grid-template-columns: 1.55fr 1fr; gap: 16px; }
-  @media (max-width: 940px) { .split { grid-template-columns: 1fr; } }
-
-  .card {
-    background: var(--panel); border: 1px solid var(--line);
-    border-radius: 4px; padding: 24px 26px;
+  .escalate .line {
+    font-family: var(--serif); font-weight: 700; font-size: 23px;
+    letter-spacing: -.02em; margin-bottom: 12px;
   }
-  .card h2 {
-    font-family: var(--mono); font-size: 11px; font-weight: 500;
-    letter-spacing: .12em; text-transform: uppercase;
-    color: var(--ink-faint); margin: 0 0 16px;
-    padding-bottom: 10px; border-bottom: 1px solid var(--line);
-  }
-  .draft { font-size: 15.5px; line-height: 1.78; white-space: pre-wrap; }
-  .draft strong { font-weight: 600; color: #fff; }
+  .escalate .why { font-size: 14px; color: var(--ink-2); max-width: 62ch; }
 
-  .evidence { list-style: none; margin: 0; padding: 0; }
+  /* ── 초안 + 근거 ───────────────────────── */
+  .split { display: grid; grid-template-columns: 1.6fr 1fr; gap: 0; }
+  @media (max-width: 960px) { .split { grid-template-columns: 1fr; } }
+
+  .col { background: var(--paper-2); border: 1.5px solid var(--rule-hard); }
+  .col + .col { border-left: 0; }
+  @media (max-width: 960px) { .col + .col { border-left: 1.5px solid var(--rule-hard); border-top: 0; } }
+
+  .col > h2 {
+    font-family: var(--serif); font-size: 13px; font-weight: 700;
+    letter-spacing: .1em; color: var(--ink-2); margin: 0;
+    padding: 13px 30px; border-bottom: 1px solid var(--rule);
+    background: var(--paper-sink);
+  }
+  .col > .body { padding: 30px 34px 34px; }
+
+  .draft {
+    font-size: 16.5px; line-height: 1.85; white-space: pre-wrap;
+    max-width: 64ch;
+  }
+  .draft strong { font-weight: 700; }
+
+  .evidence { list-style: none; margin: 0; padding: 0; counter-reset: e; }
   .evidence li {
-    font-size: 12.5px; line-height: 1.6; color: var(--ink-dim);
-    padding: 11px 0 11px 15px; border-left: 2px solid var(--line-bright);
-    margin-bottom: 9px; background: rgba(255,255,255,.012);
+    counter-increment: e; position: relative;
+    font-size: 13px; line-height: 1.7; color: var(--ink-2);
+    padding: 0 0 16px 30px; margin-bottom: 14px;
+    border-bottom: 1px dotted var(--rule);
   }
-  .evidence li:last-child { margin-bottom: 0; }
+  .evidence li:last-child { border-bottom: 0; margin-bottom: 0; padding-bottom: 0; }
+  .evidence li::before {
+    content: counter(e); position: absolute; left: 0; top: 1px;
+    font-family: var(--serif); font-weight: 700; font-size: 12px;
+    color: var(--paper-2); background: var(--rule-hard);
+    width: 19px; height: 19px; line-height: 19px; text-align: center;
+  }
 
+  /* ── 경고 ───────────────────────────────── */
   .warn {
-    border: 1px solid rgba(240,112,95,.4);
-    background: rgba(240,112,95,.07);
-    border-radius: 3px; padding: 14px 18px; margin-bottom: 16px;
-    font-size: 13.5px; color: #ffd5cd;
+    background: var(--vermilion-w); border: 1.5px solid var(--vermilion);
+    padding: 18px 24px; margin-bottom: 22px; font-size: 14.5px;
+    color: #5e1b15; max-width: 78ch;
   }
-  .warn b { color: var(--coral); }
+  .warn b { color: var(--vermilion); font-weight: 700; }
 
-  /* 상태 */
+  /* ── 상태 ───────────────────────────────── */
   .status {
-    font-family: var(--mono); font-size: 12px; color: var(--ink-faint);
-    padding: 30px 0; display: flex; align-items: center; gap: 10px;
+    font-family: var(--serif); font-size: 15px; color: var(--ink-3);
+    padding: 40px 0 44px; letter-spacing: .04em;
   }
-  .status::before {
-    content: ""; width: 8px; height: 8px; border-radius: 50%;
-    background: var(--mint); animation: blink .9s steps(2) infinite;
+  .status::after {
+    content: "···"; margin-left: 3px; letter-spacing: .2em;
+    animation: dots 1.3s steps(4) infinite;
   }
-  @keyframes blink { 0%,49% { opacity: 1 } 50%,100% { opacity: .15 } }
+  @keyframes dots { 0%{opacity:.25} 50%{opacity:1} 100%{opacity:.25} }
 
   .error {
-    border: 1px solid rgba(240,112,95,.45); background: rgba(240,112,95,.08);
-    border-radius: 3px; padding: 16px 20px; color: #ffd5cd; font-size: 14px;
+    background: var(--vermilion-w); border: 1.5px solid var(--vermilion);
+    padding: 18px 24px; color: #5e1b15; font-size: 15px;
   }
 
-  .fade { animation: rise .32s cubic-bezier(.2,.7,.3,1) both; }
-  @keyframes rise { from { opacity: 0; transform: translateY(7px) } to { opacity: 1; transform: none } }
+  .fade { animation: rise .34s cubic-bezier(.2,.75,.3,1) both; }
+  @keyframes rise { from { opacity:0; transform: translateY(9px) } to { opacity:1; transform:none } }
 </style>
 </head>
 <body>
-<header>
+
+<div class="masthead">
   <h1>셀프스터디 문의 대응</h1>
-  <span class="sub">유선 응대 콘솔</span>
-  <span class="live">근거 기반 · 사람 검수</span>
-</header>
+  <span class="tag">유선 응대용</span>
+  <span class="rule">근거 기반 · 사람 검수</span>
+</div>
 
 <main>
   <div class="ask">
-    <textarea id="q" placeholder="응시자 문의를 그대로 옮겨 적으세요.&#10;예) 3세트 2과목 제출파일은 몇 개 내나요?"></textarea>
-    <button class="go" id="go">판정</button>
+    <label>응시자 문의</label>
+    <div class="row">
+      <textarea id="q" placeholder="들으신 내용을 그대로 옮겨 적으세요.&#10;예) 3세트 2과목 제출파일은 몇 개 내나요?"></textarea>
+      <button class="go" id="go">조회</button>
+    </div>
   </div>
-  <div class="hint">Ctrl + Enter 로도 실행됩니다. 되묻기는 즉시, 초안은 몇 초 걸립니다.</div>
+  <div class="hint">Ctrl + Enter — 되묻기는 즉시, 초안은 십여 초</div>
 
   <div id="out"></div>
 </main>
@@ -222,78 +266,79 @@ const $out = document.getElementById('out');
 
 const ACTION_LABEL = {
   answer: '답변 가능', ask_grade: '등급 되묻기',
-  escalate: '담당자 확인 필요', ignore: '대응 불필요',
+  escalate: '담당자 확인', ignore: '대응 불필요',
 };
 
-function esc(s) {
-  return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-}
-function set(html) { $out.innerHTML = html; }
-function busy(msg) { set(`<div class="status">${esc(msg)}</div>`); }
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const set = html => { $out.innerHTML = html; };
+const busy = msg => set(`<div class="status">${esc(msg)}</div>`);
 
-function chips(j, extra = '') {
-  const parts = [`<span class="chip"><span class="k">분류</span>${esc(j.category)}</span>`];
-  if (j.anchor) parts.push(`<span class="chip anchor">${esc(j.anchor)}</span>`);
-  parts.push(`<span class="chip"><span class="k">행동</span>${esc(ACTION_LABEL[j.action] || j.action)}</span>`);
-  if (j.cached) parts.push(`<span class="chip"><span class="k">카탈로그</span>캐시</span>`);
-  return `<div class="verdict fade">${parts.join('')}${extra}</div>`;
+function cell(k, v, cls = '', flagged = false) {
+  return `<div class="cell${flagged ? ' flagged' : ''}">
+    <span class="k">${esc(k)}</span><span class="v ${cls}">${esc(v)}</span></div>`;
+}
+
+function verdict(j, extra = '') {
+  let html = cell('분류', j.category);
+  if (j.anchor) html += cell('근거', j.anchor, 'anchor');
+  html += cell('판정', ACTION_LABEL[j.action] || j.action);
+  return `<div class="verdict fade">${html}${extra}</div>`;
 }
 
 function renderAskBack(j) {
-  return chips(j) + `
+  return verdict(j) + `
     <div class="askback fade">
       <div class="label">이렇게 되물어 주세요</div>
-      <div class="line">"그린 과정이신가요, 블루 과정이신가요?"</div>
+      <div class="line">그린 과정이신가요,<br>블루 과정이신가요?</div>
       <div class="why">
         <b>그린과 블루는 세트명과 주제가 같고 정답만 다릅니다.</b>
         등급을 확인하지 않고 답하면 다른 등급의 정답을 근거로 안내하게 됩니다.
-        ${j.anchor ? `현재 <code>${esc(j.anchor)}</code> 까지 좁혀진 상태입니다.` : ''}
+        ${j.anchor ? `지금은 <code>${esc(j.anchor)}</code> 까지 좁혀진 상태입니다.` : ''}
       </div>
     </div>`;
 }
 
 function renderEscalate(j) {
-  return chips(j) + `
+  return verdict(j) + `
     <div class="escalate fade">
       <div class="label">담당자 확인이 필요합니다</div>
-      <div class="line">이 문의는 자료만으로 답할 수 없습니다.</div>
+      <div class="line">보유 자료만으로는 답할 수 없습니다.</div>
       <div class="why">${esc(j.reason)}</div>
     </div>`;
 }
 
 function renderDraft(j, d) {
-  const flagChips = (d.flags || [])
-    .map(f => `<span class="chip flag">${esc(f)}</span>`).join('');
-  const conf = `<span class="chip ${esc(d.confidence)}"><span class="k">신뢰도</span>${esc(d.confidence)}</span>`;
+  const extra =
+    cell('신뢰도', d.confidence, esc(d.confidence)) +
+    ((d.flags || []).length ? cell('유의', d.flags.join(' · '), '', true) : '');
 
   const warn = d.disputed ? `
     <div class="warn fade">
-      <b>공식 정답 오류가 확인된 문항입니다.</b>
-      출제기관이 오류를 인정하고 수정 예정입니다. 정답을 단정해 안내하지 마시고
+      <b>공식 정답에 오류가 확인된 문항입니다.</b>
+      출제기관이 오류를 인정하고 수정 예정입니다. 정답을 단정해 안내하지 마시고,
       경위만 전달한 뒤 검수자에게 넘겨 주세요.
     </div>` : '';
 
   const evidence = (d.evidence || []).length
     ? `<ul class="evidence">${d.evidence.map(e => `<li>${esc(e)}</li>`).join('')}</ul>`
-    : `<div style="color:var(--ink-faint);font-size:13px">근거 인용이 없습니다.</div>`;
+    : `<div style="color:var(--ink-3);font-size:13px">근거 인용이 없습니다.</div>`;
 
-  return chips(j, conf + flagChips) + warn + `
+  return verdict(j, extra) + warn + `
     <div class="split fade">
-      <div class="card">
+      <div class="col">
         <h2>답변 초안 — 검수 후 전달</h2>
-        <div class="draft">${esc(d.answer)}</div>
+        <div class="body"><div class="draft">${esc(d.answer)}</div></div>
       </div>
-      <div class="card">
+      <div class="col">
         <h2>근거</h2>
-        ${evidence}
+        <div class="body">${evidence}</div>
       </div>
     </div>`;
 }
 
 async function post(url, body) {
   const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
   if (!res.ok) {
@@ -308,15 +353,14 @@ async function run() {
   if (!question) { $q.focus(); return; }
 
   $go.disabled = true;
-  busy('문항을 특정하는 중…');
+  busy('문항을 특정하는 중');
 
   try {
     const j = await post('/api/classify', { question });
-
     if (j.action === 'ask_grade') { set(renderAskBack(j)); return; }
     if (j.action !== 'answer' || !j.anchor) { set(renderEscalate(j)); return; }
 
-    set(chips(j) + `<div class="status">근거 자료를 읽고 초안을 쓰는 중…</div>`);
+    set(verdict(j) + `<div class="status">근거를 읽고 초안을 쓰는 중</div>`);
     const d = await post('/api/draft', { question, anchor: j.anchor });
     set(renderDraft(j, d));
   } catch (err) {
