@@ -19,3 +19,6 @@ eval/draft-review*.md
 # skills-lock.json 으로 재설치 가능.
 .agents/
 .claude/
+
+# 서비스 실행 로그 — 로컬 실행 흔적이라 추적하지 않는다.
+logs/

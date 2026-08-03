@@ -20,15 +20,33 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 uv sync                              # 의존성 설치 (.venv 생성)
 uv run python -m backend.ingest.convert   # 1단계: PDF → 마크다운 + 대조 리포트
 uv run uvicorn backend.web.app:app        # 5단계: 유선 대응 웹 UI
-uv run python -m backend.sheets.client    # 6단계: 시트 연결·헤더 확인 + 서식
-uv run python -m backend.sheets.poll      # 6단계: 시트 폴링 (--once 로 1회)
-uv run python -m backend.slack.app        # 7단계: 슬랙 승인 리스너
+uv run python -m backend.service          # 6·7단계: 시트 폴링 + 슬랙 승인 (운영 실행)
 uv add <pkg>                         # 의존성 추가
 ```
 
-시트 경로는 **폴링과 리스너를 함께 띄웁니다** — 폴링이 초안 카드를 보내고,
-리스너가 [승인]/[수정]/[보류] 버튼을 받습니다.
 `.env` 에 `SHEET_URL`·`GOOGLE_CREDENTIALS`·`SLACK_BOT_TOKEN`·`SLACK_APP_TOKEN`·`SLACK_CHANNEL` 이 필요합니다.
+
+### 상시 운영
+
+시트 경로는 **누군가 항상 켜두어야 동작합니다** — 시트를 주기적으로 보고 슬랙 버튼을
+기다리는 일이라서요. 그래서 폴링과 리스너를 `backend/service.py` 한 프로세스에 묶었습니다
+(폴링은 백그라운드 스레드, 리스너가 메인).
+
+```bash
+run.bat                                                      # 로그 남기며 실행, 죽으면 30초 뒤 재시작
+powershell -ExecutionPolicy Bypass -File install-autostart.ps1  # 로그온 시 자동 시작 등록
+```
+
+로그는 `logs/service.log` (git 제외). 자동 시작은 작업 스케줄러 `kbrain-chatbot` 작업입니다 —
+해제는 `schtasks /delete /tn "kbrain-chatbot" /f`.
+
+진단이 필요할 때만 따로 띄웁니다.
+
+```bash
+uv run python -m backend.sheets.client        # 시트 연결·헤더 확인 + 줄바꿈 서식
+uv run python -m backend.sheets.poll --once   # 폴링 1회만
+uv run python -m backend.slack.app            # 슬랙 리스너만
+```
 
 인제스트는 **멱등**합니다 — 자료가 추가될 때마다 전체를 다시 돌리면 됩니다.
 산출물은 `content/selfstudy/`, 대조 리포트는 `eval/ingest-diff.md`.
@@ -156,6 +174,7 @@ raw/{green,blue}/…/{N}세트_{주제}/{N}과목_{콘텐츠|데이터분석|자
 | `docs/03-roadmap.md` | 단계별 계획과 **각 단계 완료 조건**, 비용 개산 |
 | `docs/04-open-questions.md` | 미결정 사항 — 여기 있는 항목은 임의 결정하지 말 것 |
 | `docs/05-data-survey.md` | 실제 자료 실사 결과. 설계 문서 가정과 다른 부분의 최신 근거 |
+| `docs/06-operations.md` | **담당자 PC 에 설치해 상시 실행하는 절차.** 문제 대처·비용 |
 
 `docs/03-roadmap.md` 의 단계별 **완료 조건**은 장식이 아닙니다. 각 단계는 완료 조건을
 통과해야 다음으로 넘어갑니다(예: 문항 특정 정확도 ≥99%, 변환 시 정답 숫자 누락 0건).

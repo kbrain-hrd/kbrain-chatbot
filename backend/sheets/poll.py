@@ -205,8 +205,8 @@ def run_once(
     return done
 
 
-def main() -> None:
-    once = "--once" in sys.argv
+def serve(once: bool = False) -> None:
+    """시트를 감시한다. `backend.service` 에서는 이 함수를 스레드로 돌린다."""
     interval = int(os.environ.get("POLL_INTERVAL", DEFAULT_INTERVAL))
 
     sheet = open_sheet()
@@ -242,6 +242,10 @@ def main() -> None:
             time.sleep(interval)
     except KeyboardInterrupt:
         print("\n중지했습니다.")
+
+
+def main() -> None:
+    serve(once="--once" in sys.argv)
 
 
 if __name__ == "__main__":
