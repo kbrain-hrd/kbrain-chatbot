@@ -23,10 +23,11 @@ from pydantic import BaseModel, Field
 from backend.search.catalog import OPS_SECTION_HEADING
 from backend.search.index import OpsIndex, render_hits
 
-# 검색이 정답을 1위로 올리지 못하는 경우가 있다("떨어지면 다시" ↔ "재응시" 처럼 낱말이
-# 안 겹칠 때). 실측에서 정답은 3·6·6·9위였다. 재현율을 우선해 넉넉히 싣고 고르는 일은
-# LLM 에 맡긴다 — 119개 중에서 고르는 것보다 12개 중에서 고르는 편이 쉽다.
-OPS_TOP_N = 12
+# 검색 결과를 몇 개 실을 것인가. 처음에는 BM25 단독의 최악 순위(9위)에 맞춰 12로 뒀는데,
+# 의미 검색을 얹은 뒤 실측 14건이 **전부 top-3** 안에 들어왔다. 그대로 두면 관련 없는
+# 섹션을 9개씩 더 싣는 셈이고, 그 노이즈는 실제로 오분류를 일으켰다 — 첨부파일 문의에
+# 딸려 온 "교육 신청·접수" FAQ 가 문항을 운영으로 기울였다. 최악 3위 + 여유 2로 잡는다.
+OPS_TOP_N = 5
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CATALOG_PATH = PROJECT_ROOT / "content" / "catalog.md"
