@@ -9,6 +9,7 @@ raw/
 # 컬럼 제거·패턴 마스킹으로는 걸러지지 않으므로 원격에 올리지 않는다.
 # backend/sheets/ 의 스크립트로 언제든 재생성 가능.
 eval/questions.md
+eval/inquiries.md
 eval/goldset-candidates.md
 
 # 초안 검수 리포트 — 질문 원문 포함이라 원격에 올리지 않는다.
