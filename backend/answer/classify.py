@@ -123,6 +123,11 @@ SYSTEM_RULES = """\
 """
 
 
+GRADE_REMINDER = """다시 확인한다 — 질문 텍스트에 "그린" 또는 "블루"라는 낱말이 그대로 있지 않으면
+등급은 예외 없이 `?` 다. 카탈로그에 한쪽 등급만 있어 보이거나 내용이 비슷하다는 것은
+등급 근거가 아니다. 등급이 `?` 인 문항 문의는 `ask_grade` 다."""
+
+
 def load_catalog() -> str:
     if not CATALOG_PATH.is_file():
         raise SystemExit(f"카탈로그가 없습니다: {CATALOG_PATH}\nbackend.search.catalog 를 먼저 실행하세요.")
@@ -150,6 +155,10 @@ def classify(
             {"type": "text", "text": SYSTEM_RULES},
             # 카탈로그까지가 캐시 구간이다. 질문은 이 뒤(messages)에 온다.
             {"type": "text", "text": catalog, "cache_control": {"type": "ephemeral"}},
+            # 카탈로그가 길어질수록 맨 앞의 등급 규칙이 묻힌다. 운영 FAQ 34건을 넣었더니
+            # 등급을 유추하는 사례가 다시 나타났다(9회 중 3회 → 편입 전 7회 중 0회).
+            # 가장 위험한 규칙 하나만 카탈로그 뒤에 다시 붙인다. 캐시 구간 밖이라 비용은 무시할 수준.
+            {"type": "text", "text": GRADE_REMINDER},
         ],
         messages=[{"role": "user", "content": f"다음 문의를 판정하세요.\n\n{question}"}],
         output_format=Judgment,

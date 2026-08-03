@@ -217,14 +217,24 @@ def extract_pdf(path: Path) -> list[Section]:
 
 # 운영 자료에는 담당자 이름·연락처가 섞여 있다. content/ 는 git 추적 대상이므로
 # **출력 직전에 일괄 마스킹**한다. 추출기별로 처리하면 새 형식을 추가할 때 빠뜨린다.
-NAME_WITH_TITLE_RE = re.compile(r"[가-힣]{2,4}\s*(주임|대리|과장|차장|부장|팀장|사원|매니저|강사)")
+# 직함 뒤를 함께 본다. `대리`·`사원` 은 일반명사이기도 해서 뒤를 보지 않으면
+# "후배의 **대리 신청**", "불가피할 경우 **대리 가입**" 까지 이름으로 지운다.
+# 실명은 `님`·조사·괄호를 달고 나오지만, 일반명사는 뒤에 명사가 이어진다.
+NAME_WITH_TITLE_RE = re.compile(
+    r"[가-힣]{2,4}\s*(?:주임|대리|과장|차장|부장|팀장|사원|매니저|강사|연구원|수석)"
+    r"(?=님|께|이|가|은|는|을|를|에게|와|과|[)\]\},.]|$)"
+)
 PHONE_RE = re.compile(r"01[016-9][-.\s]?\d{3,4}[-.\s]?\d{4}")
 TEL_RE = re.compile(r"0\d{1,2}[-.\s]\d{3,4}[-.\s]\d{4}")
 EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+")
 
 
+# 공개된 공식 문의처는 개인정보가 아니다. 지우면 "어디로 문의하나요" 에 답할 수 없다.
+PUBLIC_CONTACTS = ("databus@nia.or.kr",)
+
+
 def scrub(text: str) -> str:
-    text = EMAIL_RE.sub("[이메일]", text)
+    text = EMAIL_RE.sub(lambda m: m.group() if m.group() in PUBLIC_CONTACTS else "[이메일]", text)
     text = PHONE_RE.sub("[연락처]", text)
     text = TEL_RE.sub("[연락처]", text)
     return NAME_WITH_TITLE_RE.sub("[담당자]", text)
@@ -263,6 +273,43 @@ def extract_xlsx(path: Path) -> list[Section]:
     return sections
 
 
+# 문의 이력 워크북에서 **읽어도 되는 시트**. 나머지 시트는 실명·소속·연락처가 담긴
+# 상담 이력 8천 행이라 블랙리스트(PII_SHEET_WORDS)로는 시트가 늘 때마다 새어 나간다.
+# 그래서 이 파일만은 화이트리스트로 막는다.
+FAQ_SHEET = "AI챔피언자주하는 질문(25년~)"
+
+# 응시자에게 나갈 답변이 아니라 담당자 업무 루틴이 적힌 행. 근거로 잡히면
+# "진동으로 해놓고 부재중 확인" 같은 내부 지침을 인용하게 된다.
+FAQ_INTERNAL_ROWS = {"문의 방법", "1:1 게시판/메일", "전화/문자"}
+
+
+def extract_faq(path: Path) -> list[Section]:
+    """문의 FAQ 시트 — **질문 한 줄이 섹션 하나**다.
+
+    다른 운영 문서와 달리 주제로 묶지 않는다. 제목이 곧 질문 원문이라 그 자체가
+    가장 정확한 조회 키이기 때문이다(`III AI 챔피언` 같은 무의미한 제목과 반대).
+    """
+    from openpyxl import load_workbook
+
+    wb = load_workbook(path, read_only=True, data_only=True)
+    if FAQ_SHEET not in wb.sheetnames:
+        wb.close()
+        return []
+
+    sections = []
+    for row in wb[FAQ_SHEET].iter_rows(values_only=True):
+        cells = [re.sub(r"\s+", " ", str(c)).strip() for c in row[:2] if c is not None]
+        if len(cells) < 2:
+            continue  # 답변이 아직 없는 행
+        question, answer = cells
+        if question in FAQ_INTERNAL_ROWS:
+            continue
+        sections.append(Section(question, answer))
+
+    wb.close()
+    return sections
+
+
 # ---------------------------------------------------------------- 출력
 
 
@@ -281,11 +328,13 @@ def render(doc: Document) -> str:
     # 모호해지므로 뒤에 순번을 붙여 유일하게 만든다.
     used: dict[str, int] = {}
     for section in doc.sections:
-        anchor = f"OPS-{doc.slug}-{slugify(section.title)}"
+        # 마스킹을 먼저 한다. 제목만 가리고 앵커를 원문으로 만들면 앵커에 실명이 남는다.
+        title = scrub(section.title)
+        anchor = f"OPS-{doc.slug}-{slugify(title)}"
         used[anchor] = used.get(anchor, 0) + 1
         if used[anchor] > 1:
             anchor = f"{anchor}-{used[anchor]}"
-        out += [f"## [{anchor}] {scrub(section.title)}", "", scrub(section.body).strip(), ""]
+        out += [f"## [{anchor}] {title}", "", scrub(section.body).strip(), ""]
     return "\n".join(out).rstrip() + "\n"
 
 
@@ -303,7 +352,12 @@ def build() -> list[Document]:
         ("보조강사FAQ", find("*보조강사FAQ.xlsx")),
         ("운영준비체크리스트", find("*운영 준비 체크리스트.xlsx")),
         ("강사안내메일", find("*AI 리터러시와 업무활용 보조강사 안내 메일안.txt")),
+        ("문의FAQ", find("*문의내용 정리*.xlsx")),
     ]
+
+    # 확장자만으로 고를 수 없는 문서. 문의 이력 워크북은 xlsx 지만 통째로 읽으면
+    # 개인정보가 쏟아지므로 FAQ 시트만 읽는 전용 추출기를 쓴다.
+    overrides = {"문의FAQ": extract_faq}
 
     extractors = {
         ".hwpx": extract_hwpx,
@@ -319,7 +373,8 @@ def build() -> list[Document]:
             print(f"  건너뜀 (파일 없음): {slug}")
             continue
         doc = Document(slug, source, [])
-        doc.sections = extractors[source.suffix.lower()](source)
+        extractor = overrides.get(slug) or extractors[source.suffix.lower()]
+        doc.sections = extractor(source)
         docs.append(doc)
 
     return docs
