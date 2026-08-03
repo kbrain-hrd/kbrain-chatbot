@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from backend.answer.classify import build_client, classify, load_catalog
+from backend.search.index import build_index
 from backend.answer.draft import Draft, load_materials, make_draft
 from backend.sheets.extract import Entry, read_entries
 from backend.sheets.goldset import classify as rule_classify
@@ -129,6 +130,7 @@ def main() -> None:
 
     client = build_client()
     catalog = load_catalog()
+    ops_index = build_index()
     entries = collect_questions()
 
     # 크레딧을 예고 없이 태우지 않도록 상한을 먼저 밝힌다.
@@ -145,7 +147,7 @@ def main() -> None:
             break
 
         try:
-            judgment, _ = classify(client, entry.question, catalog)
+            judgment, _ = classify(client, entry.question, catalog, index=ops_index)
         except Exception as exc:
             rows.append(Row(entry.question, "-", "", "-", "", None, f"판정 실패: {exc}"))
             continue
@@ -159,7 +161,7 @@ def main() -> None:
             if grade:
                 asked_grade = True
                 try:
-                    judgment, _ = classify(client, f"[{grade} 등급] {entry.question}", catalog)
+                    judgment, _ = classify(client, f"[{grade} 등급] {entry.question}", catalog, index=ops_index)
                 except Exception as exc:
                     rows.append(
                         Row(entry.question, "-", "", "-", "", None, f"재판정 실패: {exc}", True)

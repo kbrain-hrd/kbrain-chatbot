@@ -232,6 +232,18 @@ EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+")
 # 공개된 공식 문의처는 개인정보가 아니다. 지우면 "어디로 문의하나요" 에 답할 수 없다.
 PUBLIC_CONTACTS = ("databus@nia.or.kr",)
 
+# 자료 기준 연도. 해가 바뀌면 여기를 고친다 — `datetime.now()` 를 쓰면 실행 시점에 따라
+# 산출물이 달라져 인제스트가 멱등하지 않게 된다.
+CURRENT_YEAR = 2026
+
+# "2024년 확정 정원" 처럼 **연도가 판정 기준으로 박힌** 서술. 그대로 답변에 실리면 오답이다.
+# 단순히 연도가 등장하는 것(문제 지문 인용 등)까지 잡으면 15개 섹션이 걸려 표시가 무의미해진다.
+STALE_YEAR_RE = re.compile(r"(20\d\d)년\s*(?:확정|기준|정원|이후|부터|까지|현재|말|상반기|하반기)")
+
+
+def stale_years(body: str) -> list[str]:
+    return sorted({y for y in STALE_YEAR_RE.findall(body) if y != str(CURRENT_YEAR)})
+
 
 def scrub(text: str) -> str:
     text = EMAIL_RE.sub(lambda m: m.group() if m.group() in PUBLIC_CONTACTS else "[이메일]", text)
@@ -334,7 +346,16 @@ def render(doc: Document) -> str:
         used[anchor] = used.get(anchor, 0) + 1
         if used[anchor] > 1:
             anchor = f"{anchor}-{used[anchor]}"
-        out += [f"## [{anchor}] {title}", "", scrub(section.body).strip(), ""]
+        body = scrub(section.body).strip()
+        # 답변으로 나가기 전에 사람이 확인해야 하는 대목을 본문에 남긴다. 초안 생성 때
+        # 자료와 함께 읽히므로 모델도 이 단서를 보고 단정을 피할 수 있다.
+        years = stale_years(body)
+        if years:
+            body += (
+                f"\n\n<!-- 확인 필요: {'·'.join(years)}년 기준으로 서술된 내용이 있습니다. "
+                f"현재({CURRENT_YEAR}년) 기준과 다를 수 있으니 그대로 답변하지 마세요. -->"
+            )
+        out += [f"## [{anchor}] {title}", "", body, ""]
     return "\n".join(out).rstrip() + "\n"
 
 

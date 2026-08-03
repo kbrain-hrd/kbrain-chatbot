@@ -25,6 +25,10 @@ OVERRIDES_PATH = Path("content/question-overrides.md")
 
 OPS_HEADING_RE = re.compile(r"^## \[(OPS-[^\]]+)\]\s*(.+)$")
 
+# 카탈로그를 문항/운영으로 가르는 경계. 판정 때 운영만 검색 결과로 갈아끼우므로
+# 여기서만 정의하고 backend.answer.classify 가 같은 값을 쓴다.
+OPS_SECTION_HEADING = "## 운영 자료"
+
 # 3과목은 단답 정답이 없는 산출물 평가라 문항 앵커가 성립하지 않는다.
 SHORT_ANSWER_SUBJECTS = (1, 2)
 
@@ -280,6 +284,7 @@ class OpsSection:
     title: str
     length: int  # 본문 길이 — 조회 비용 가늠용
     keywords: str  # 본문에 나타난 운영 핵심어
+    body: str  # 검색 색인용. 카탈로그 표에는 싣지 않는다
 
 
 def collect_operations() -> list[OpsSection]:
@@ -298,7 +303,7 @@ def collect_operations() -> list[OpsSection]:
             body = "\n".join(lines[index + 1 : end]).strip()
             found = [word for word in OPS_KEYWORDS if word in body]
             sections.append(
-                OpsSection(match.group(1), doc, match.group(2).strip(), len(body), " · ".join(found))
+                OpsSection(match.group(1), doc, match.group(2).strip(), len(body), " · ".join(found), body)
             )
     return sections
 
@@ -365,10 +370,13 @@ def render(questions: list[Question], ops: list[OpsSection]) -> str:
                 out.append("")
 
     out += [
-        "## 운영 자료",
+        OPS_SECTION_HEADING,
         "",
         "운영 질문(신청 방법·응시 환경·합격 기준·일정 등)의 근거다. 문항 구조가 없어 **섹션 단위**로 특정한다.",
         "본문 길이는 조회 비용 가늠용이며, 긴 섹션은 통째로 싣기 전에 필요한 부분을 확인하세요.",
+        "",
+        "아래 표는 **사람이 전체를 훑기 위한 목록**이다. 판정할 때는 이 표를 통째로 싣지 않고",
+        "질문으로 검색한 상위 12개만 싣는다 (`backend/search/index.py`). 문항 표는 전량 싣는다.",
         "",
         "**어디를 먼저 볼지**:",
         "",

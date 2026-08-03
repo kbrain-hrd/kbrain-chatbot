@@ -21,6 +21,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from backend.search.index import build_index
 from backend.answer.classify import DEFAULT_MODEL, build_client, classify, load_catalog
 from backend.sheets.extract import read_entries
 from backend.sheets.goldset import classify as rule_classify
@@ -103,15 +104,20 @@ def grade_of(anchor: str) -> str:
 
 
 def main() -> None:
-    model = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_MODEL
+    # 운영 섹션은 기본이 검색이다. `--full` 을 주면 예전처럼 전량 싣는다 —
+    # 자료가 늘어 검색이 놓치기 시작할 때 두 방식을 견주기 위해 남겨 둔다.
+    args = [a for a in sys.argv[1:] if a != "--full"]
+    use_search = "--full" not in sys.argv
+    model = args[0] if args else DEFAULT_MODEL
 
     items = load_gold_items()
     scored = [i for i in items if "검수전" not in i.flag]
     print(f"골드셋 {len(items)}건 중 측정 대상 {len(scored)}건 (검수전 {len(items) - len(scored)}건 제외)")
-    print(f"모델: {model}\n")
+    print(f"모델: {model}  운영 섹션: {'검색 상위 N개' if use_search else '전량'}\n")
 
     client = build_client()
     catalog = load_catalog()
+    ops_index = build_index() if use_search else None
 
     category_hit = subject_hit = grade_hit = action_hit = 0
     subject_total = grade_total = 0
@@ -119,7 +125,7 @@ def main() -> None:
     misses: list[str] = []
 
     for index, item in enumerate(scored, start=1):
-        judgment, response = classify(client, item.question, catalog, model=model)
+        judgment, response = classify(client, item.question, catalog, model=model, index=ops_index)
 
         usage = response.usage
         cache_read += usage.cache_read_input_tokens or 0

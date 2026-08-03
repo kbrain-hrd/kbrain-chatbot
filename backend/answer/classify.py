@@ -20,6 +20,14 @@ import anthropic
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
+from backend.search.catalog import OPS_SECTION_HEADING
+from backend.search.index import OpsIndex, render_hits
+
+# 검색이 정답을 1위로 올리지 못하는 경우가 있다("떨어지면 다시" ↔ "재응시" 처럼 낱말이
+# 안 겹칠 때). 실측에서 정답은 3·6·6·9위였다. 재현율을 우선해 넉넉히 싣고 고르는 일은
+# LLM 에 맡긴다 — 119개 중에서 고르는 것보다 12개 중에서 고르는 편이 쉽다.
+OPS_TOP_N = 12
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CATALOG_PATH = PROJECT_ROOT / "content" / "catalog.md"
 
@@ -141,20 +149,42 @@ def build_client() -> anthropic.Anthropic:
     return anthropic.Anthropic()
 
 
+def split_catalog(catalog: str) -> tuple[str, str]:
+    """카탈로그를 (문항, 운영) 으로 가른다."""
+    at = catalog.find(OPS_SECTION_HEADING)
+    if at == -1:
+        return catalog, ""
+    return catalog[:at].rstrip() + "\n", catalog[at:]
+
+
 def classify(
     client: anthropic.Anthropic,
     question: str,
     catalog: str,
     model: str = DEFAULT_MODEL,
+    index: OpsIndex | None = None,
 ) -> tuple[Judgment, anthropic.types.Message]:
-    """질문 하나를 판정한다. (판정, 원응답) 을 돌려준다 — 사용량 확인용."""
+    """질문 하나를 판정한다. (판정, 원응답) 을 돌려준다 — 사용량 확인용.
+
+    `index` 를 주면 운영 섹션을 통째로 싣지 않고 **질문에 관련된 상위 N개만** 싣는다.
+    문항 카탈로그는 그대로 둔다 — 검색으로 가르면 안 되는 이유는 backend/search/index.py 참조.
+    """
+    if index is not None:
+        items, _ = split_catalog(catalog)
+        catalog = items
+        operations = render_hits(index.search(question, top_n=OPS_TOP_N))
+    else:
+        operations = ""
+
     response = client.messages.parse(
         model=model,
         max_tokens=2000,
         system=[
             {"type": "text", "text": SYSTEM_RULES},
-            # 카탈로그까지가 캐시 구간이다. 질문은 이 뒤(messages)에 온다.
+            # 문항 카탈로그까지가 캐시 구간이다. 질문마다 달라지는 운영 검색 결과와
+            # 질문 자체는 이 뒤에 온다 — 앞에 두면 매 요청 프리픽스가 달라져 캐시가 통째로 깨진다.
             {"type": "text", "text": catalog, "cache_control": {"type": "ephemeral"}},
+            *([{"type": "text", "text": operations}] if operations else []),
             # 카탈로그가 길어질수록 맨 앞의 등급 규칙이 묻힌다. 운영 FAQ 34건을 넣었더니
             # 등급을 유추하는 사례가 다시 나타났다(9회 중 3회 → 편입 전 7회 중 0회).
             # 가장 위험한 규칙 하나만 카탈로그 뒤에 다시 붙인다. 캐시 구간 밖이라 비용은 무시할 수준.

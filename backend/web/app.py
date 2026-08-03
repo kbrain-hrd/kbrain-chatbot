@@ -23,6 +23,7 @@ from pydantic import BaseModel
 
 from backend.answer.classify import build_client, classify, load_catalog
 from backend.answer.draft import load_materials, make_draft
+from backend.search.index import OpsIndex, build_index
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -30,13 +31,16 @@ app = FastAPI(title="셀프스터디 문의 대응")
 
 _client: anthropic.Anthropic | None = None
 _catalog: str = ""
+_index: OpsIndex | None = None
 
 
 def client() -> anthropic.Anthropic:
-    global _client, _catalog
+    global _client, _catalog, _index
     if _client is None:
         _client = build_client()
         _catalog = load_catalog()
+        # 운영 섹션 색인. 파일로 떨구지 않고 기동 시 메모리에 세운다.
+        _index = build_index()
     return _client
 
 
@@ -56,7 +60,7 @@ def api_classify(request: AskRequest) -> dict:
     if not question:
         raise HTTPException(status_code=400, detail="질문이 비어 있습니다.")
 
-    judgment, response = classify(client(), question, _catalog)
+    judgment, response = classify(client(), question, _catalog, index=_index)
     return {
         "category": judgment.category,
         "anchor": judgment.anchor,
