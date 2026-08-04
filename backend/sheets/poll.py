@@ -241,10 +241,29 @@ def serve(once: bool = False) -> None:
         return
 
     print(f"{interval}초 간격 폴링. 중지는 Ctrl+C.\n")
+    failures = 0
     try:
         while True:
             stamp = datetime.now().strftime("%H:%M:%S")
-            done = run_once(sheet, client, catalog, grade, index)
+
+            # **한 사이클이 실패해도 루프를 끝내지 않는다.** 구글 시트 연결이 끊기는 일은
+            # 실제로 일어나고(ConnectionResetError 실측, 2026-08-03), 그걸로 폴링이
+            # 영구히 멈추면 프로세스는 살아 있어서 재시작도 걸리지 않는다.
+            # 카드가 안 오는데 이유를 모르는 상태가 가장 나쁘다.
+            try:
+                done = run_once(sheet, client, catalog, grade, index)
+            except Exception as exc:
+                failures += 1
+                print(
+                    f"[{stamp}] 폴링 실패 {failures}회째 "
+                    f"({type(exc).__name__}: {exc}) — {interval}초 뒤 다시 시도합니다"
+                )
+                time.sleep(interval)
+                continue
+
+            if failures:
+                print(f"[{stamp}] 폴링 복구됨 (연속 실패 {failures}회 뒤)")
+                failures = 0
             if done:
                 print(f"[{stamp}] 처리 {done}행\n")
             time.sleep(interval)
