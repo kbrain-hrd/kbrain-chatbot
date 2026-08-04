@@ -19,11 +19,14 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 
 import anthropic
 
@@ -62,6 +65,12 @@ ACTION_FLAG = {
     "ignore": "무관",
 }
 
+# 근거가 없어 못 답한 것(정상)과 입력이 온전하지 않아 막힌 것(버그)을 가르는 표시.
+MISROUTED_FLAG = "판정실패"
+
+# 판정 결과 이력. 질문 원문은 담지 않는다(해시로 식별). git 제외 경로에 둔다.
+SNAPSHOT_PATH = Path(__file__).resolve().parents[2] / "logs" / "judgments.json"
+
 
 @dataclass
 class Result:
@@ -71,6 +80,26 @@ class Result:
     draft: str
     evidence: str
     flags: str
+    trail: str = ""  # 판정 이력 — 첫 판정과 재판정이 어떻게 갈렸는지
+    misrouted: bool = False  # 입력이 온전하지 않아 막힌 건인가 (근거 부족과 구분)
+
+
+@dataclass
+class Ask:
+    """시트 한 행에서 만든 판정 입력.
+
+    **질문과 등급을 따로 들고 다니지 않는다.** 예전에는 `question` 과 `grade` 가 따로
+    흘러서 호출부마다 등급을 얹는 것을 기억해야 했고, 실제로 한 곳에서 빠뜨려
+    초안이 통째로 누락됐다 (2026-08-04). 행에서 입력을 만드는 지점을 여기 하나로 묶는다.
+    """
+
+    question: str  # 마스킹된 원문 — 기록·표시용
+    prompt: str  # 판정에 실제로 넣는 문자열
+    grade: str  # 시트에서 확정된 등급 (없으면 빈 문자열)
+
+    @property
+    def graded(self) -> bool:
+        return bool(self.grade)
 
 
 def with_grade(question: str, grade: str) -> str:
@@ -95,11 +124,16 @@ def with_grade(question: str, grade: str) -> str:
     return f"[{grade} 등급] {question}"
 
 
+def build_ask(row: dict[str, str], grade: str) -> Ask:
+    """시트 행 → 판정 입력. **판정에 넣을 문자열은 반드시 이 함수를 거친다.**"""
+    question = question_of(row)
+    return Ask(question=question, prompt=with_grade(question, grade), grade=grade)
+
+
 def process(
     client: anthropic.Anthropic,
     catalog: str,
-    question: str,
-    grade: str,
+    ask: Ask,
     index: HybridIndex,
 ) -> Result:
     """질문 하나를 판정하고, 답변 가능한 경우에만 초안까지 만든다.
@@ -107,8 +141,9 @@ def process(
     `index` 는 운영 섹션 검색기다. 카탈로그에 운영 섹션이 더 이상 들어 있지 않으므로
     (docs/04 2-7·2-8) 이것을 넘기지 않으면 운영 문의가 근거를 찾지 못한다.
     """
-    asked = with_grade(question, grade)
+    asked = ask.prompt
     judgment, _ = classify(client, asked, catalog, index=index)
+    trail = [f"1차 {judgment.action}"]
 
     # 근거가 있는데도 `escalate` 로 흔들리는 경우가 있어 다시 판정한다.
     # 같은 질문·같은 코드로 3회 돌려 1회가 escalate 로 나오는 것을 실측했다 (2026-08-03).
@@ -121,12 +156,22 @@ def process(
         if judgment.action != "escalate" or judgment.category not in ("운영", "문항"):
             break
         retry, _ = classify(client, asked, catalog, index=index)
+        trail.append(f"재판정 {retry.action}")
         if retry.action == "answer" and retry.anchor:
             judgment = retry
             break
 
     anchor = judgment.anchor or "-"
-    flags = [ACTION_FLAG[judgment.action]] if judgment.action in ACTION_FLAG else []
+
+    # **`되묻기` 와 `판정실패` 를 가른다.** 시트가 등급을 아는데도 되묻기가 나왔다면
+    # 응시자에게 물을 일이 아니라 **입력이 제대로 전달되지 않았다는 신호**다.
+    # 예전에는 이것이 `사람확인필요` 에 섞여 들어가, 근거가 없어 못 답한 정상 건과
+    # 화면상 구분되지 않았다 (2026-08-04). 섞이면 버그가 조용히 지나간다.
+    misrouted = judgment.action == "ask_grade" and ask.graded
+    if misrouted:
+        flags = [MISROUTED_FLAG]
+    else:
+        flags = [ACTION_FLAG[judgment.action]] if judgment.action in ACTION_FLAG else []
 
     if judgment.action != "answer" or not judgment.anchor:
         return Result(
@@ -134,20 +179,24 @@ def process(
             draft="",
             evidence=f"{anchor} — {judgment.reason}",
             flags=" · ".join(flags),
+            trail=" → ".join(trail),
+            misrouted=misrouted,
         )
 
     try:
         materials = load_materials(judgment.anchor)
     except SystemExit as exc:
-        # 재시도해도 같은 결과다. 사유를 남기고 사람에게 넘긴다.
+        # 앵커까지 잡고 자료를 못 찾은 것은 판정이 아니라 자료 쪽 문제다.
         return Result(
             category=judgment.category,
             draft="",
             evidence=f"{anchor} — {judgment.reason}",
-            flags=f"자료없음 · 사람확인필요 ({exc})",
+            flags=f"{MISROUTED_FLAG} · 자료없음 ({exc})",
+            trail=" → ".join(trail),
+            misrouted=True,
         )
 
-    draft, _ = make_draft(client, question, materials)
+    draft, _ = make_draft(client, ask.question, materials)
 
     evidence = [f"{anchor} — {judgment.reason}", *draft.evidence]
     if materials.disputed and "공식정답오류" not in draft.flags:
@@ -158,7 +207,52 @@ def process(
         draft=draft.answer,
         evidence="\n".join(evidence),
         flags=" · ".join([*draft.flags, f"신뢰도 {draft.confidence}"]),
+        trail=" → ".join(trail),
     )
+
+
+def snapshot_key(question: str) -> str:
+    """질문을 식별하는 열쇠. **원문을 남기지 않는다** — 본문에 이름·소속이 적힌 사례가 있다."""
+    return hashlib.sha256(question.encode("utf-8")).hexdigest()[:12]
+
+
+def load_snapshots() -> dict[str, dict]:
+    if not SNAPSHOT_PATH.is_file():
+        return {}
+    try:
+        return json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return {}  # 깨졌으면 버리고 새로 쌓는다. 회귀 감지는 보조 장치다
+
+
+def check_regression(question: str, result: Result) -> str:
+    """같은 질문이 예전보다 나쁘게 판정됐으면 그 사실을 돌려준다.
+
+    초안이 나오던 질문이 어느 날 조용히 초안 없이 넘어가는 일이 실제로 있었다
+    (2026-08-04). 그때는 로그를 파야만 알 수 있었다. 결과를 남겨두고 견주면
+    같은 일이 반복될 때 바로 드러난다.
+    """
+    snapshots = load_snapshots()
+    key = snapshot_key(question)
+    before = snapshots.get(key)
+
+    note = ""
+    if before and before.get("drafted") and not result.draft:
+        note = f"초안이 있던 질문인데 이번엔 초안 없음 (이전 앵커 {before.get('anchor', '-')})"
+
+    snapshots[key] = {
+        "drafted": bool(result.draft),
+        "anchor": result.evidence.split(" —")[0] if result.evidence else "-",
+        "flags": result.flags,
+    }
+    try:
+        SNAPSHOT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        SNAPSHOT_PATH.write_text(
+            json.dumps(snapshots, ensure_ascii=False, indent=1), encoding="utf-8"
+        )
+    except OSError as exc:
+        print(f"      판정 이력 저장 실패 ({exc}) — 회귀 감지만 건너뜁니다")
+    return note
 
 
 def alert(text: str) -> bool:
@@ -195,10 +289,11 @@ def run_once(
     done = 0
     for row in targets:
         row_number = int(row["_row"])
-        question = question_of(row)
+        ask = build_ask(row, grade)
+        question = ask.question
 
         try:
-            result = process(client, catalog, question, grade, index)
+            result = process(client, catalog, ask, index)
         except Exception as exc:
             # 일시적 실패로 본다. 상태를 그대로 두면 다음 폴링에서 재시도된다.
             print(f"  {row_number}행 실패 ({type(exc).__name__}: {exc}) — 상태 유지, 다음 폴링에서 재시도")
@@ -217,6 +312,7 @@ def run_once(
                     "draft": result.draft,
                     "evidence": result.evidence,
                     "flags": result.flags,
+                    "trail": result.trail,
                 },
             )
         except Exception as exc:
@@ -234,7 +330,24 @@ def run_once(
         print(
             f"  {row_number}행 → {result.category} · {mark} · "
             f"{result.flags or '플래그 없음'} · {STATUS_REVIEW} · {sent}"
+            + (f"  [{result.trail}]" if result.trail else "")
         )
+
+        # 입력이 온전하지 않아 막힌 건은 **버그 신호**다. 근거가 없어 못 답한 정상 건과
+        # 달리 사람이 코드를 봐야 하므로, 로그에만 남기지 않고 바로 알린다.
+        if result.misrouted:
+            print(f"      ⚠️ 판정실패 — 입력이 제대로 전달되지 않았을 수 있습니다")
+            alert(
+                f"⚠️ *{row_number}행 판정실패* — 근거를 찾기 전 단계에서 막혔습니다.\n"
+                f"```{result.flags}\n판정 이력: {result.trail or '-'}```\n"
+                f"시트 등급: {grade or '(불명)'} · 근거가 없어 못 답한 것과는 다른 상황입니다."
+            )
+
+        # 같은 질문이 예전보다 나쁘게 판정됐는지 견준다.
+        regression = check_regression(question, result)
+        if regression:
+            print(f"      ⚠️ 회귀: {regression}")
+            alert(f"⚠️ *{row_number}행 판정 강등* — {regression}")
 
     return done
 

@@ -76,6 +76,7 @@ def post_card(sheet: Sheet, row_number: int, values: dict[str, str]) -> str:
         evidence=values["evidence"],
         flags=values["flags"],
         sheet_url=sheet.row_url(row_number),
+        trail=values.get("trail", ""),
     )
     response = WebClient(token=config["bot"]).chat_postMessage(
         channel=config["channel"],
@@ -222,6 +223,24 @@ def build_app() -> App:
             ),
             text=f"수정 승인 · {row_number}행",
         )
+
+    @app.action("rejudge")
+    def rejudge(ack, body, client, say) -> None:
+        """다시 판정한다 — 상태를 비워 다음 폴링이 그 행을 미처리로 보게 한다.
+
+        리스너는 판정기·색인을 들고 있지 않으므로 여기서 직접 다시 돌리지 않는다.
+        상태를 되돌리는 것으로 충분하고, **사람이 눌러서 일어난 일**이라 자동 상태
+        변경 금지 원칙에도 어긋나지 않는다.
+        """
+        ack()
+        row_number, row, error = resolve(body["actions"][0]["value"])
+        if row is None:
+            say(text=f"⚠️ {error}")
+            return
+
+        who = body["user"].get("name") or body["user"]["id"]
+        sheet.write(row_number, {"status": ""})
+        close_card(client, body, f"🔄 *{who}* 재판정 요청 → 다음 폴링에서 다시 처리됩니다")
 
     @app.action("hold")
     def hold(ack, body, client, say) -> None:

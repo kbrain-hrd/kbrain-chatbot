@@ -79,6 +79,7 @@ def build(
     evidence: str,
     flags: str,
     sheet_url: str,
+    trail: str = "",
 ) -> list[dict]:
     """초안 카드 블록. 초안이 없으면 승인할 것이 없으므로 버튼을 달지 않는다."""
     key = row_key(row_number, question)
@@ -125,6 +126,13 @@ def build(
             {"type": "section", "text": {"type": "mrkdwn", "text": f"*근거*\n{clip(evidence, 1500)}"}}
         )
 
+    # 판정이 어떻게 갈렸는지 남긴다. 초안이 없을 때 "왜 없는가"를 카드에서 바로 볼 수 있어야
+    # 로그를 파지 않고도 근거 부족인지 판정이 막힌 것인지 가늠할 수 있다.
+    if trail:
+        blocks.append(
+            {"type": "context", "elements": [{"type": "mrkdwn", "text": f"*판정 이력* {trail}"}]}
+        )
+
     actions: list[dict] = [
         {
             "type": "button",
@@ -157,6 +165,17 @@ def build(
             "value": key,
         }
     )
+    if not draft:
+        # 초안이 없을 때만 준다. 판정이 막혀서 초안이 없는 경우가 있어(입력 누락 등),
+        # 고친 뒤 사람이 직접 다시 돌려볼 수 있어야 한다.
+        decisions.append(
+            {
+                "type": "button",
+                "text": {"type": "plain_text", "text": "재판정"},
+                "action_id": "rejudge",
+                "value": key,
+            }
+        )
     decisions.append(
         {
             "type": "button",
