@@ -39,7 +39,7 @@ from backend.sheets.client import (
     question_of,
 )
 from backend.sheets.goldset import sheet_grade_of
-from backend.slack.app import post_card
+from backend.slack.app import post_alert, post_card
 
 DEFAULT_INTERVAL = 60
 
@@ -52,6 +52,10 @@ MAX_PER_CYCLE = 20
 # `escalate` 가 나왔을 때 다시 판정해 볼 횟수. 판정 1회가 약 12원이라 부담이 크지 않고,
 # 되묻기·사람확인으로 새는 건을 줄이는 값이 그보다 크다.
 ESCALATE_RETRIES = 2
+
+# 이만큼 연속으로 실패하면 슬랙에 알린다. 한두 번은 흔한 일이라 알릴 값이 없고,
+# 이 정도면 일시적 오류로 보기 어렵다. 기본 간격(60초)에서 약 5분에 해당한다.
+ALERT_AFTER = 5
 
 ACTION_FLAG = {
     "ask_grade": "등급되묻기필요",
@@ -148,6 +152,19 @@ def process(
     )
 
 
+def alert(text: str) -> bool:
+    """슬랙에 운영 경고를 올린다. **알림이 실패해도 폴링을 멈추지 않는다.**
+
+    네트워크가 끊긴 상황이면 슬랙 호출도 함께 실패할 수 있는데, 그것 때문에 폴링까지
+    죽으면 알리려던 문제를 더 키운다.
+    """
+    try:
+        return post_alert(text)
+    except Exception as exc:
+        print(f"      슬랙 알림 실패 ({type(exc).__name__}: {exc})")
+        return False
+
+
 def run_once(
     sheet: Sheet,
     client: anthropic.Anthropic,
@@ -242,6 +259,7 @@ def serve(once: bool = False) -> None:
 
     print(f"{interval}초 간격 폴링. 중지는 Ctrl+C.\n")
     failures = 0
+    alerted = False
     try:
         while True:
             stamp = datetime.now().strftime("%H:%M:%S")
@@ -258,12 +276,24 @@ def serve(once: bool = False) -> None:
                     f"[{stamp}] 폴링 실패 {failures}회째 "
                     f"({type(exc).__name__}: {exc}) — {interval}초 뒤 다시 시도합니다"
                 )
+                # 로그는 사람이 열어봐야 보인다. 계속 실패하면 담당자가 보고 있는
+                # 검수 채널로 알린다. 복구될 때까지 한 번만 보낸다 — 30초마다
+                # 같은 경고가 쌓이면 채널이 묻힌다.
+                if failures >= ALERT_AFTER and not alerted:
+                    alerted = alert(
+                        f"⚠️ *시트 폴링이 {failures}회 연속 실패했습니다* — 질문 감지가 멈춰 있습니다.\n"
+                        f"```{type(exc).__name__}: {exc}```\n"
+                        "인터넷 연결 · 시트 공유 권한 · 서비스 계정 키를 확인하세요."
+                    )
                 time.sleep(interval)
                 continue
 
             if failures:
                 print(f"[{stamp}] 폴링 복구됨 (연속 실패 {failures}회 뒤)")
+                if alerted:
+                    alert(f"✅ 시트 폴링이 복구됐습니다 (연속 실패 {failures}회 뒤).")
                 failures = 0
+                alerted = False
             if done:
                 print(f"[{stamp}] 처리 {done}행\n")
             time.sleep(interval)

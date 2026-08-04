@@ -85,6 +85,19 @@ def post_card(sheet: Sheet, row_number: int, values: dict[str, str]) -> str:
     return response["ts"]
 
 
+def post_alert(text: str) -> bool:
+    """운영 경고를 검수 채널에 올린다. 슬랙이 설정돼 있지 않으면 아무것도 하지 않는다.
+
+    카드와 같은 채널로 보낸다. 담당자가 이미 보고 있는 곳이라 따로 확인할 데를
+    늘리지 않는다.
+    """
+    config = settings()
+    if not (config["bot"] and config["channel"]):
+        return False
+    WebClient(token=config["bot"]).chat_postMessage(channel=config["channel"], text=text)
+    return True
+
+
 def find_row(sheet: Sheet, row_number: int) -> dict[str, str] | None:
     for row in sheet.read(ROW_FIELDS):
         if int(row["_row"]) == row_number:
