@@ -31,7 +31,6 @@ from backend.answer.classify import build_client, classify, load_catalog
 from backend.answer.draft import load_materials, make_draft
 from backend.search.index import HybridIndex, build_hybrid_index
 from backend.sheets.client import (
-    STATUS_HOLD,
     STATUS_REVIEW,
     Sheet,
     is_pending,
@@ -74,6 +73,28 @@ class Result:
     flags: str
 
 
+def with_grade(question: str, grade: str) -> str:
+    """시트 등급을 질문에 얹는다.
+
+    시트가 `AI 챔피언 그린 4회차` 처럼 등급별로 나뉘어 있으면 **그 시트에 올라온 질문의
+    등급은 이미 확정**이다. 그런데도 원문으로 먼저 묻고 되묻기가 나오면 그때 등급을
+    붙이는 방식이었는데, 그러면 세 가지가 나빠진다.
+
+    1. 답을 아는 것을 모르는 척 물어보므로 API 호출이 두 배가 된다
+    2. 첫 판정이 되묻기가 아닌 다른 이유로 흔들리면 등급을 얹을 기회를 놓친다
+    3. 되묻기가 최종 결과로 남을 수 있다 — 시트가 등급을 아는데 응시자에게 되묻는 셈이다
+
+    → **처음부터 얹는다.** 단, 질문이 스스로 등급을 밝혔으면 그것을 따른다.
+
+    이것은 "등급을 추측하지 않는다"는 제약을 어기는 것이 아니다. 추측 금지는 질문 **본문**에서
+    등급을 유추하지 말라는 것이고, 시트 출처는 유추가 아니라 확정된 사실이다.
+    시트 이름에 등급이 없으면 `grade` 가 비고, 그때는 원문 그대로 물어 되묻게 한다.
+    """
+    if not grade or "그린" in question or "블루" in question:
+        return question
+    return f"[{grade} 등급] {question}"
+
+
 def process(
     client: anthropic.Anthropic,
     catalog: str,
@@ -83,23 +104,11 @@ def process(
 ) -> Result:
     """질문 하나를 판정하고, 답변 가능한 경우에만 초안까지 만든다.
 
-    `grade` 는 시트 이름에서 뽑은 등급이다. 시트가 `AI 챔피언 그린 4회차` 처럼 등급별로
-    나뉘어 있으면 **그 시트에 올라온 질문의 등급은 이미 확정**이므로 되물을 이유가 없다.
-    질문 텍스트만 보고 되묻는 것은 시트 경로에서 불필요한 왕복을 만든다
-    (pipeline.py 도 같은 방식으로 되묻기 후 재판정을 재현한다).
-
-    이것은 "등급을 추측하지 않는다"는 제약을 어기는 것이 아니다. 추측 금지는 질문 **본문**에서
-    등급을 유추하지 말라는 것이고, 시트 출처는 유추가 아니라 확정된 사실이다.
-    시트 이름에 등급이 없으면 `grade` 가 비고, 그때는 그대로 되묻는다.
-
     `index` 는 운영 섹션 검색기다. 카탈로그에 운영 섹션이 더 이상 들어 있지 않으므로
     (docs/04 2-7·2-8) 이것을 넘기지 않으면 운영 문의가 근거를 찾지 못한다.
     """
-    judgment, _ = classify(client, question, catalog, index=index)
-
-    # 등급만 몰라서 막힌 경우에 한해 시트 등급을 얹어 다시 판정한다.
-    if judgment.action == "ask_grade" and grade:
-        judgment, _ = classify(client, f"[{grade} 등급] {question}", catalog, index=index)
+    asked = with_grade(question, grade)
+    judgment, _ = classify(client, asked, catalog, index=index)
 
     # 근거가 있는데도 `escalate` 로 흔들리는 경우가 있어 다시 판정한다.
     # 같은 질문·같은 코드로 3회 돌려 1회가 escalate 로 나오는 것을 실측했다 (2026-08-03).
@@ -111,7 +120,7 @@ def process(
     for _ in range(ESCALATE_RETRIES):
         if judgment.action != "escalate" or judgment.category not in ("운영", "문항"):
             break
-        retry, _ = classify(client, question, catalog, index=index)
+        retry, _ = classify(client, asked, catalog, index=index)
         if retry.action == "answer" and retry.anchor:
             judgment = retry
             break
@@ -214,17 +223,17 @@ def run_once(
             print(f"  {row_number}행 슬랙 발송 실패 ({type(exc).__name__}: {exc}) — 다음 폴링에서 재시도")
             continue
 
-        # 초안이 있으면 검수할 것이 있으니 `검수대기`, 없으면 사람이 직접 써야 하니
-        # `답변대기` 다. 초안 없는 건을 검수대기로 두면 담당자가 슬랙에서 승인하려다
-        # 누를 버튼이 없는 것을 보게 된다.
-        status = STATUS_REVIEW if result.draft else STATUS_HOLD
-        sheet.write(row_number, {"status": status})
+        # **상태는 언제나 `검수대기` 다.** 초안이 없다고 시스템이 `답변대기` 로 단정하지
+        # 않는다 — 처리 결과를 정하는 것은 사람이고, 사람이 누르지 않았는데 상태가 바뀌면
+        # 검수한 적 없는 건이 처리된 것처럼 보인다. 초안이 없는 건도 카드에 [직접 작성]과
+        # [보류] 가 달리므로 슬랙에서 그대로 처리할 수 있다.
+        sheet.write(row_number, {"status": STATUS_REVIEW})
         done += 1
-        mark = "초안" if result.draft else "판정만"
+        mark = "초안" if result.draft else "초안없음"
         sent = "카드 발송" if posted else "슬랙 미설정"
         print(
             f"  {row_number}행 → {result.category} · {mark} · "
-            f"{result.flags or '플래그 없음'} · {status} · {sent}"
+            f"{result.flags or '플래그 없음'} · {STATUS_REVIEW} · {sent}"
         )
 
     return done

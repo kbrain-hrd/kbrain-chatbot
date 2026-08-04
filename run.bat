@@ -15,6 +15,15 @@ if not exist logs mkdir logs
 echo. >> logs\service.log
 echo ==================== 시작 %date% %time% ==================== >> logs\service.log
 uv run python -m backend.service >> logs\service.log 2>&1
+
+REM 코드 3 = 서비스가 이미 실행 중. 다시 띄우면 같은 질문을 두 번 처리하므로 물러난다.
+if %errorlevel%==3 (
+    echo ---- 이미 실행 중이라 이 창은 종료합니다 ---- >> logs\service.log
+    goto end
+)
+
 echo ---- 종료됨 (코드 %errorlevel%). 30초 뒤 다시 시작합니다 ---- >> logs\service.log
 timeout /t 30 /nobreak > nul
 goto loop
+
+:end

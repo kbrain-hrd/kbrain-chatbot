@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import os
+import socket
 import threading
 import traceback
 from datetime import datetime
@@ -31,9 +32,34 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 from backend.sheets import poll
 from backend.slack.app import build_app, settings
 
+# 중복 실행을 막는 자물쇠. 이 포트를 잡은 프로세스가 유일한 서비스다.
+# 포트를 쓰는 이유는 **프로세스가 어떻게 죽든 OS 가 반드시 회수해 주기 때문**이다.
+# 잠금 파일은 강제 종료·정전 뒤 남아서 다음 실행을 막아 버린다.
+LOCK_PORT = 57321
+
+_lock: socket.socket | None = None
+
 
 def stamp() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def acquire_lock() -> bool:
+    """이 프로세스가 유일한 서비스인지 확보한다. 이미 떠 있으면 False.
+
+    두 개가 동시에 돌면 같은 질문을 두 번 처리해 카드가 중복 발송되고, 옛 코드와 새 코드가
+    같은 시트를 건드려 로그와 시트가 어긋난다 (2026-08-04 실제로 겪음).
+    """
+    global _lock
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        server.bind(("127.0.0.1", LOCK_PORT))
+        server.listen(1)
+    except OSError:
+        server.close()
+        return False
+    _lock = server  # 프로세스가 사는 동안 잡아 둔다
+    return True
 
 
 def poll_forever() -> None:
@@ -52,6 +78,16 @@ def poll_forever() -> None:
 
 def main() -> None:
     config = settings()
+
+    if not acquire_lock():
+        print(
+            f"[{stamp()}] 서비스가 이미 실행 중입니다 (포트 {LOCK_PORT} 사용 중) — 종료합니다.\n"
+            "  중복 실행하면 같은 질문이 두 번 처리됩니다.\n"
+            "  기존 것을 멈추려면: schtasks /end /tn \"kbrain-chatbot\""
+        )
+        # run.bat 은 이 코드를 보고 재시작 루프를 멈춘다. 30초마다 같은 메시지를
+        # 로그에 쌓지 않기 위해서다.
+        raise SystemExit(3)
 
     print(f"[{stamp()}] 셀프스터디 문의 대응 서비스 시작")
     print(f"  슬랙 채널: {config['channel']}")

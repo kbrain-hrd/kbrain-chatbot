@@ -114,7 +114,8 @@ def build(
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
-                    "text": "*초안 없음* — 근거가 부족하거나 사람이 판단해야 하는 문의입니다.",
+                    "text": "*초안 없음* — 근거가 부족하거나 사람이 판단해야 하는 문의입니다.\n"
+                    "`직접 작성` 으로 답을 쓰거나 `보류` 로 넘기세요.",
                 },
             }
         )
@@ -133,32 +134,41 @@ def build(
         }
     ]
 
+    # **초안이 없어도 버튼을 단다.** 사람이 누르기 전에는 시스템이 처리 결과를 정하지
+    # 않는다는 것이 원칙이고, 버튼이 없으면 슬랙에서 할 수 있는 일이 없어 그 원칙을
+    # 지킬 수 없다. 초안이 없을 때는 승인할 대상이 없으므로 [승인] 대신 [직접 작성]을 둔다.
+    decisions: list[dict] = []
     if draft:
-        # 승인·수정 모두 시트를 다시 읽어 반영한다 — 카드의 초안은 발송 시점 스냅샷이라
-        # 시트에서 수정한 내용이 날아갈 수 있다 (app.py `approve` 참조).
-        actions = [
+        decisions.append(
             {
                 "type": "button",
                 "text": {"type": "plain_text", "text": "승인"},
                 "style": "primary",
                 "action_id": "approve",
                 "value": key,
-            },
-            {
-                "type": "button",
-                "text": {"type": "plain_text", "text": "수정"},
-                "action_id": "revise",
-                "value": key,
-            },
-            {
-                "type": "button",
-                "text": {"type": "plain_text", "text": "보류"},
-                "style": "danger",
-                "action_id": "hold",
-                "value": key,
-            },
-            *actions,
-        ]
+            }
+        )
+    decisions.append(
+        {
+            "type": "button",
+            "text": {"type": "plain_text", "text": "수정" if draft else "직접 작성"},
+            "style": None if draft else "primary",
+            "action_id": "revise",
+            "value": key,
+        }
+    )
+    decisions.append(
+        {
+            "type": "button",
+            "text": {"type": "plain_text", "text": "보류"},
+            "style": "danger",
+            "action_id": "hold",
+            "value": key,
+        }
+    )
+    # style 이 None 인 항목은 슬랙이 거부하므로 뺀다.
+    decisions = [{k: v for k, v in button.items() if v is not None} for button in decisions]
+    actions = [*decisions, *actions]
 
     blocks.append({"type": "actions", "elements": actions})
     return blocks
@@ -196,18 +206,19 @@ def revise_view(
 ) -> dict:
     """초안을 채워 넣은 편집 모달. 여기서 고친 내용이 최종답변이 된다."""
     trimmed = draft[:MAX_INITIAL]
+    element: dict = {"type": "plain_text_input", "action_id": "value", "multiline": True}
+    if trimmed:
+        # 초안이 없는 건(근거부족·사람확인)은 빈 칸으로 연다. 슬랙은 빈 문자열
+        # `initial_value` 를 거부하므로 아예 넣지 않는다.
+        element["initial_value"] = trimmed
+
     blocks: list[dict] = [
         {"type": "section", "text": {"type": "mrkdwn", "text": f"*질문*\n{clip(question, 1000)}"}},
         {
             "type": "input",
             "block_id": "answer",
             "label": {"type": "plain_text", "text": "최종답변"},
-            "element": {
-                "type": "plain_text_input",
-                "action_id": "value",
-                "multiline": True,
-                "initial_value": trimmed,
-            },
+            "element": element,
         },
     ]
     if len(draft) > MAX_INITIAL:
@@ -227,7 +238,10 @@ def revise_view(
     return {
         "type": "modal",
         "callback_id": "revise_submit",
-        "title": {"type": "plain_text", "text": f"{row_number}행 답변 수정"},
+        "title": {
+            "type": "plain_text",
+            "text": f"{row_number}행 답변 {'수정' if draft else '작성'}",
+        },
         "submit": {"type": "plain_text", "text": "저장하고 승인"},
         "close": {"type": "plain_text", "text": "취소"},
         # 모달 제출 시에는 원본 메시지 정보가 오지 않으므로 여기에 실어 보낸다.
