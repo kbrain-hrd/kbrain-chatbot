@@ -20,6 +20,10 @@ if not exist logs mkdir logs
 
 set PYTHONIOENCODING=utf-8
 set PYTHONUTF8=1
+REM Write every line straight to the log. Without this Python buffers output when
+REM redirected to a file, so the log lags behind and - worse - whatever the
+REM service printed just before dying is lost with the buffer.
+set PYTHONUNBUFFERED=1
 
 title kbrain-chatbot service (do not close)
 echo ===============================================================
