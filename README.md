@@ -98,6 +98,35 @@
 
 ---
 
+## 설치와 점검
+
+새 PC 에 올릴 때 순서입니다. 자세한 내용과 문제 대처는 [docs/06-operations.md](docs/06-operations.md).
+
+```powershell
+git clone https://github.com/kbrain-hrd/kbrain-chatbot.git
+cd kbrain-chatbot
+uv sync                                   # 의존성 + .venv (임베딩 모델 471MB 는 첫 실행 때 받음)
+```
+
+**git 에 없는 파일 둘을 따로 복사해야 합니다** — `.env` 와 `raw/<서비스계정>.json`.
+없으면 시트·슬랙 경로가 뜨지 않습니다.
+
+점검은 이 순서로, 앞이 통과해야 다음으로 넘어갑니다.
+
+| 확인 | 명령 | 정상 신호 |
+|---|---|---|
+| 시트 연결 | `uv run python -m backend.sheets.client` | 컬럼 매핑 4개(F·G·H·I)와 미처리 행 수가 나옴 |
+| 슬랙 연결 | `uv run python -m backend.slack.app` | `Bolt app is running!` (Ctrl+C 로 종료) |
+| 폴링 1회 | `uv run python -m backend.sheets.poll --once` | 시트명·등급이 찍히고 `처리 N행` |
+| 오프라인 코어 | `uv run python -m backend.search.index "재응시가 가능한가요"` | 섹션 색인 수와 상위 후보 목록 |
+
+자동 시작 등록은 `powershell -ExecutionPolicy Bypass -File install-autostart.ps1` 입니다.
+**시작 프로그램 폴더**에 런처를 넣는 방식이라 관리자 권한이 필요 없습니다
+(작업 스케줄러는 환경에 따라 `Access is denied` 로 막혀 폐기했습니다 — 2026-08-04).
+해제는 `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\kbrain-chatbot.bat` 삭제.
+
+---
+
 ## 문서
 
 | 문서 | 내용 |

@@ -37,8 +37,9 @@ run.bat                                                      # 로그 남기며 
 powershell -ExecutionPolicy Bypass -File install-autostart.ps1  # 로그온 시 자동 시작 등록
 ```
 
-로그는 `logs/service.log` (git 제외). 자동 시작은 작업 스케줄러 `kbrain-chatbot` 작업입니다 —
-해제는 `schtasks /delete /tn "kbrain-chatbot" /f`.
+로그는 `logs/service.log` (git 제외). 자동 시작은 **시작 프로그램 폴더**에 런처를 넣는
+방식입니다 — 해제는 `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\kbrain-chatbot.bat`
+삭제. (작업 스케줄러는 `Access is denied` 로 막혀 폐기했습니다.)
 
 진단이 필요할 때만 따로 띄웁니다.
 

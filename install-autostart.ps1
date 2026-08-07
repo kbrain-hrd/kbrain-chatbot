@@ -28,7 +28,16 @@ $body = @"
 @echo off
 start "kbrain-chatbot" /min "$runBat"
 "@
-[System.IO.File]::WriteAllText($launcher, $body, (New-Object System.Text.UTF8Encoding $false))
+
+# **OEM 코드페이지로 쓴다.** cmd 는 로그온 시 배치 파일을 시스템 기본 코드페이지(한글
+# Windows 는 949)로 읽는다. UTF-8 로 저장하면 경로의 한글(`C:\Users\케이브레인\…`)이
+# 깨져 run.bat 을 찾지 못하고, 창도 안 뜨고 로그도 안 남아 **조용히 실패한다**
+# (2026-08-07 실측: 등록은 성공했는데 로그온해도 아무 일도 일어나지 않음).
+# 경로가 전부 영문이면 두 인코딩의 바이트가 같아 드러나지 않는 종류의 버그다.
+# run.bat 헤더의 "keep this file ASCII-only" 와 같은 함정 — 그쪽은 본문에서 한글을
+# 걷어내 해결했지만, 여기는 경로에 한글이 박혀 있어 인코딩을 맞추는 수밖에 없다.
+$oemCp = [int](Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Nls\CodePage").OEMCP
+[System.IO.File]::WriteAllText($launcher, $body, [System.Text.Encoding]::GetEncoding($oemCp))
 
 Write-Host ""
 Write-Host "등록 완료"
