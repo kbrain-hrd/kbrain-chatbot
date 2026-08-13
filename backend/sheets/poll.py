@@ -59,6 +59,12 @@ ESCALATE_RETRIES = 2
 # 이 정도면 일시적 오류로 보기 어렵다. 기본 간격(60초)에서 약 5분에 해당한다.
 ALERT_AFTER = 5
 
+# 하루 한 번 "살아 있다"고 알리는 시각(시). **죽은 뒤에는 알릴 주체가 없다** —
+# 폴링 실패는 알리지만 서비스가 통째로 사라지면 아무 일도 일어나지 않는다.
+# 2026-08-07 에 창이 닫혀 6일간 멈춰 있었는데 아무도 몰랐다.
+# 그래서 반대로 뒤집는다. 아침에 이 신호가 안 오면 멈춘 것이다.
+HEARTBEAT_HOUR = 9
+
 ACTION_FLAG = {
     "ask_grade": "등급되묻기필요",
     "escalate": "사람확인필요",
@@ -382,9 +388,22 @@ def serve(once: bool = False) -> None:
     print(f"{interval}초 간격 폴링. 중지는 Ctrl+C.\n")
     failures = 0
     alerted = False
+    # 시작한 날은 보내지 않는다. 방금 띄운 것을 굳이 알릴 값이 없다.
+    beat_sent_on = datetime.now().date()
+    processed_today = 0
     try:
         while True:
-            stamp = datetime.now().strftime("%H:%M:%S")
+            now = datetime.now()
+            stamp = now.strftime("%H:%M:%S")
+
+            if now.date() != beat_sent_on and now.hour >= HEARTBEAT_HOUR:
+                if alert(
+                    f"🟢 문의 대응 서비스 정상 가동 중 ({now:%m월 %d일 %H:%M})\n"
+                    f"어제 처리 {processed_today}건. "
+                    "이 신호가 안 오는 날은 서비스가 멈춘 것입니다."
+                ):
+                    beat_sent_on = now.date()
+                    processed_today = 0
 
             # **한 사이클이 실패해도 루프를 끝내지 않는다.** 구글 시트 연결이 끊기는 일은
             # 실제로 일어나고(ConnectionResetError 실측, 2026-08-03), 그걸로 폴링이
@@ -417,6 +436,7 @@ def serve(once: bool = False) -> None:
                 failures = 0
                 alerted = False
             if done:
+                processed_today += done
                 print(f"[{stamp}] 처리 {done}행\n")
             time.sleep(interval)
     except KeyboardInterrupt:
