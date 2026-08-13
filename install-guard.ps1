@@ -12,15 +12,20 @@ $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $guard = Join-Path $root "guard.ps1"
+$launcher = Join-Path $root "guard.vbs"
 $taskName = "kbrain-chatbot-guard"
 
-if (-not (Test-Path $guard)) {
-    Write-Error "guard.ps1 을 찾지 못했습니다: $guard"
+foreach ($f in @($guard, $launcher)) {
+    if (-not (Test-Path $f)) { Write-Error "파일을 찾지 못했습니다: $f" }
 }
 
 # 작업 스케줄러에 등록. 현재 사용자로, 로그온해 있을 때만 돈다 —
 # 서비스가 .env 와 구글 자격증명을 사용자 환경에서 읽기 때문이다.
-$command = "powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$guard`""
+#
+# **powershell.exe 를 직접 걸지 않는다.** -WindowStyle Hidden 을 줘도 콘솔이 만들어졌다
+# 잠시 뒤 숨겨져서, 5분마다 화면이 깜빡이며 작업을 가린다. wscript 는 콘솔이 없으므로
+# 거기서 PowerShell 을 창 없이 띄우면 창이 아예 만들어지지 않는다.
+$command = "wscript.exe //B //Nologo `"$launcher`""
 schtasks /create /tn $taskName /tr $command /sc minute /mo 5 /f | Out-Null
 
 # 옛 시작 프로그램 런처 제거 (있으면)
