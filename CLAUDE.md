@@ -33,13 +33,22 @@ uv add <pkg>                         # 의존성 추가
 (폴링은 백그라운드 스레드, 리스너가 메인).
 
 ```bash
-run.bat                                                      # 로그 남기며 실행, 죽으면 30초 뒤 재시작
-powershell -ExecutionPolicy Bypass -File install-autostart.ps1  # 로그온 시 자동 시작 등록
+powershell -ExecutionPolicy Bypass -File install-guard.ps1   # 감시 등록 (한 번만)
+powershell -ExecutionPolicy Bypass -File stop.ps1            # 일부러 멈출 때
 ```
 
-로그는 `logs/service.log` (git 제외). 자동 시작은 **시작 프로그램 폴더**에 런처를 넣는
-방식입니다 — 해제는 `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\kbrain-chatbot.bat`
-삭제. (작업 스케줄러는 `Access is denied` 로 막혀 폐기했습니다.)
+**서비스 창은 뜨지 않습니다.** 작업 스케줄러가 5분마다 `guard.ps1` 을 돌려, 꺼져 있으면
+창 없이 다시 띄웁니다. 자동 시작도 이것이 겸합니다.
+
+창을 없앤 이유가 있습니다. **콘솔 창은 사람이 만지면 멈춥니다** — `Ctrl+C` 는 글자가
+선택돼 있지 않으면 복사가 아니라 중단이고, 창을 클릭만 해도 선택 모드로 들어가 출력이
+막혀 프로그램이 섭니다. 2026-08-07 에 실제로 그렇게 멈춰 **6일 동안 아무도 몰랐습니다.**
+`run.bat` 의 재시작 루프는 파이썬이 죽었을 때만 작동해서, 창이 닫히면 그 루프까지
+같이 사라집니다.
+
+돌고 있는지 확인: `Get-NetTCPConnection -LocalPort 57321 -State Listen`
+로그는 `logs/service.log`, 감시 기록은 `logs/guard.log` (둘 다 git 제외).
+감시 해제는 `schtasks /delete /tn "kbrain-chatbot-guard" /f`.
 
 진단이 필요할 때만 따로 띄웁니다.
 

@@ -89,22 +89,30 @@ uv run python -m backend.sheets.client
 
 컬럼 매핑과 미처리 행 수가 나오면 정상입니다. 여기서 실패하면 아래 5장을 보세요.
 
-### 3-6. 자동 시작 등록
+### 3-6. 감시 등록 — 이것 하나면 자동 시작까지 됩니다
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File install-autostart.ps1
+powershell -ExecutionPolicy Bypass -File install-guard.ps1
 ```
 
-관리자 권한은 필요 없습니다. **시작 프로그램 폴더**에 런처를 넣는 방식이라
-현재 사용자로 로그온할 때만, 최소화된 창으로 실행됩니다.
+관리자 권한은 필요 없습니다. 작업 스케줄러에 **5분마다 도는 감시**를 등록합니다.
+감시는 서비스가 꺼져 있으면 **창 없이** 다시 띄웁니다. 로그온 후에도 5분 안에 알아서
+뜨므로 자동 시작을 따로 걸 필요가 없습니다.
+
+**서비스 창은 뜨지 않습니다.** 콘솔 창은 사람이 만지면 멈추기 때문입니다 —
+`Ctrl+C` 는 글자가 선택돼 있지 않으면 복사가 아니라 중단이고, 창을 클릭만 해도
+선택 모드로 들어가 출력이 막혀 프로그램이 섭니다. 2026-08-07 에 실제로 그렇게 멈춰
+6일 동안 아무도 몰랐습니다.
 
 ### 3-7. 지금 바로 시작
 
-탐색기에서 `run.bat` 을 더블클릭하거나:
+감시를 기다리지 않고 즉시 띄우려면:
 
 ```powershell
-start "" /min run.bat
+powershell -ExecutionPolicy Bypass -File guard.ps1
 ```
+
+이미 돌고 있으면 아무 일도 하지 않습니다.
 
 ---
 
@@ -135,17 +143,17 @@ Bolt app is running!
 ### 명령 모음
 
 ```powershell
-start "" /min run.bat                       # 시작 (탐색기에서 더블클릭해도 같음)
-                                            # 중지: 서비스 창을 닫는다
+powershell -ExecutionPolicy Bypass -File guard.ps1    # 즉시 시작 (돌고 있으면 아무 일 없음)
+powershell -ExecutionPolicy Bypass -File stop.ps1     # 중지 (감시까지 멈춘다)
 Get-NetTCPConnection -LocalPort 57321 -State Listen   # 돌고 있는지 확인 (자물쇠 포트)
-$s = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\kbrain-chatbot.bat"
-Test-Path $s                                # 자동 시작 등록 상태 확인
-del $s                                      # 자동 시작 해제
+schtasks /query  /tn "kbrain-chatbot-guard"           # 감시 등록 상태
+schtasks /change /tn "kbrain-chatbot-guard" /enable   # 감시 되살리기
+schtasks /delete /tn "kbrain-chatbot-guard" /f        # 감시 해제
 ```
 
-중지에 별도 명령이 없는 것은 **창 자체가 서비스이기 때문**입니다. 창을 닫으면 멈춥니다.
-창을 찾지 못하겠으면 작업 관리자에서 `python.exe` 를 종료해도 되지만, 그러면 `run.bat` 이
-30초 뒤 다시 띄우므로 창까지 닫아야 완전히 멈춥니다.
+**중지에 `stop.ps1` 이 따로 있는 이유**가 있습니다. 프로세스만 죽이면 5분 안에 감시가
+다시 띄웁니다. `stop.ps1` 은 감시를 먼저 비활성화한 뒤 프로세스를 끝냅니다.
+다시 켤 때는 `guard.ps1` 을 돌리고, 감시도 `/enable` 로 되살려야 합니다.
 
 ---
 
@@ -160,8 +168,9 @@ del $s                                      # 자동 시작 해제
 | `찾지 못한 컬럼이 있습니다` | 시트 헤더가 바뀌었습니다. 로그에 실제 헤더가 찍히니 대조하세요 |
 | 카드가 안 옴 | 슬랙 봇이 채널에 초대돼 있는지(`/invite @봇이름`), `SLACK_CHANNEL` 이 채널 ID(`C…`)인지 확인 |
 | 버튼을 눌러도 무반응 | 서비스가 꺼져 있습니다. 로그와 `Get-NetTCPConnection -LocalPort 57321 -State Listen` 를 보세요 |
-| `이미 실행 중입니다` | 정상입니다. 서비스는 한 번에 하나만 뜹니다. 기존 것을 멈추려면 그 서비스 창을 닫으세요 |
-| 로그온했는데 창이 안 뜸 | 자동 시작 런처가 없거나 깨졌습니다. `install-autostart.ps1` 을 다시 실행하세요 (경로에 한글이 있으면 인코딩 문제가 납니다 — 3-6 참고) |
+| `이미 실행 중입니다` | 정상입니다. 서비스는 한 번에 하나만 뜹니다. 멈추려면 `stop.ps1` |
+| 서비스가 안 뜸 | `logs\guard.log` 를 보세요. 감시가 돌기는 했는지, 띄우려다 실패했는지 적혀 있습니다. 감시 자체가 없으면 `install-guard.ps1` 을 다시 실행하세요 |
+| 멈췄는데 자꾸 되살아남 | 감시가 5분마다 띄웁니다. `stop.ps1` 로 멈추면 감시까지 비활성화됩니다 |
 | 시트 구조를 바꿨는데 반영 안 됨 | 시작할 때 한 번 읽습니다. 서비스를 재시작하세요 |
 
 **프로그램이 죽으면 `run.bat` 이 30초 뒤 다시 띄웁니다.** 다만 같은 오류로 계속 죽으면
