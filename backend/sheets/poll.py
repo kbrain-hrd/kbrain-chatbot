@@ -37,7 +37,7 @@ from backend.sheets.client import (
     STATUS_REVIEW,
     Sheet,
     is_pending,
-    open_sheet,
+    open_sheets,
     question_of,
 )
 from backend.sheets.goldset import sheet_grade_of
@@ -362,7 +362,7 @@ def serve(once: bool = False) -> None:
     """시트를 감시한다. `backend.service` 에서는 이 함수를 스레드로 돌린다."""
     interval = int(os.environ.get("POLL_INTERVAL", DEFAULT_INTERVAL))
 
-    sheet = open_sheet()
+    sheets = open_sheets()
     client = build_client()
     catalog = load_catalog()
 
@@ -371,17 +371,36 @@ def serve(once: bool = False) -> None:
     print("운영 검색 색인 구축 중…")
     index = build_hybrid_index()
 
-    title = sheet.worksheet.spreadsheet.title
-    grade = GRADE_WORD.get(sheet_grade_of(title), "")
+    # 등급은 시트마다 따로 잡는다. 그린과 블루는 세트명·주제가 같은데 정답이 달라서,
+    # 한 등급으로 뭉뚱그리면 엉뚱한 정답을 근거로 답하게 된다.
+    targets = []
+    for sheet in sheets:
+        title = sheet.worksheet.spreadsheet.title
+        targets.append((sheet, title, GRADE_WORD.get(sheet_grade_of(title), "")))
 
-    print(f"시트: {title} [{sheet.worksheet.title}]")
-    print(f"상태가 비어 있는 행을 처리해 '{STATUS_REVIEW}' 로 바꿉니다.")
-    print(f"시트 등급: {grade or '불명 — 등급이 필요한 문항 문의는 되묻습니다'}")
-    print("판정 약 12원 / 초안 약 99원 — 사이클당 최대 "
+    print(f"감시 시트 {len(targets)}개 — 상태가 비어 있는 행을 '{STATUS_REVIEW}' 로 바꿉니다.")
+    for _, title, grade in targets:
+        print(f"  · {title}  (등급: {grade or '불명 — 등급이 필요한 문항 문의는 되묻습니다'})")
+    print("판정 약 12원 / 초안 약 99원 — 시트당 사이클마다 최대 "
           f"{MAX_PER_CYCLE}행 (2026-08-01 실측)\n")
 
+    def sweep() -> int:
+        """모든 시트를 한 바퀴 돈다. 한 시트가 실패해도 나머지는 처리한다 —
+        시트 하나 때문에 전체가 멈추면 다른 회차 문의까지 방치된다."""
+        total = 0
+        for sheet, title, grade in targets:
+            try:
+                got = run_once(sheet, client, catalog, grade, index)
+            except Exception as exc:
+                print(f"  [{title}] 처리 실패 ({type(exc).__name__}: {exc})")
+                raise
+            if got:
+                print(f"  [{title}] {got}행")
+            total += got
+        return total
+
     if once:
-        done = run_once(sheet, client, catalog, grade, index)
+        done = sweep()
         print(f"\n처리 {done}행")
         return
 
@@ -410,7 +429,7 @@ def serve(once: bool = False) -> None:
             # 영구히 멈추면 프로세스는 살아 있어서 재시작도 걸리지 않는다.
             # 카드가 안 오는데 이유를 모르는 상태가 가장 나쁘다.
             try:
-                done = run_once(sheet, client, catalog, grade, index)
+                done = sweep()
             except Exception as exc:
                 failures += 1
                 print(

@@ -60,14 +60,22 @@ def extract_draft(blocks: list[dict]) -> str:
     return html.unescape("".join(text for _, text in sorted(parts)))
 
 
-def row_key(row_number: int, question: str) -> str:
-    """버튼에 실을 식별자. 행 번호와 질문 앞부분을 함께 담는다."""
-    return json.dumps({"row": row_number, "q": question[:KEY_LENGTH]}, ensure_ascii=False)
+def row_key(row_number: int, question: str, sheet_id: str = "") -> str:
+    """버튼에 실을 식별자. 행 번호·질문 앞부분과 함께 **어느 시트인지**를 담는다.
+
+    시트를 여럿 감시하면 행 번호만으로는 부족하다. 그린 5회차 7행과 블루 5회차 7행이
+    동시에 존재하므로, 시트를 빼면 승인 결과가 엉뚱한 회차에 적힌다.
+    """
+    data = {"row": row_number, "q": question[:KEY_LENGTH]}
+    if sheet_id:
+        data["s"] = sheet_id
+    return json.dumps(data, ensure_ascii=False)
 
 
-def parse_key(value: str) -> tuple[int, str]:
+def parse_key(value: str) -> tuple[int, str, str]:
+    """(행번호, 질문앞부분, 시트ID) — 시트ID 는 옛 카드에는 없어 빈 문자열이 된다."""
     data = json.loads(value)
-    return int(data["row"]), data["q"]
+    return int(data["row"]), data["q"], data.get("s", "")
 
 
 def build(
@@ -80,9 +88,11 @@ def build(
     flags: str,
     sheet_url: str,
     trail: str = "",
+    sheet_id: str = "",
+    sheet_title: str = "",
 ) -> list[dict]:
     """초안 카드 블록. 초안이 없으면 승인할 것이 없으므로 버튼을 달지 않는다."""
-    key = row_key(row_number, question)
+    key = row_key(row_number, question, sheet_id)
 
     # 분류·플래그는 라벨을 붙여 한 줄에 모은다. 제목의 대괄호나 ⚠️ 만으로는
     # 그것이 무엇인지 알 수 없다 — 시트에서 뺀 컬럼이라 카드가 유일한 표시 자리다.
@@ -96,7 +106,12 @@ def build(
             "elements": [
                 {
                     "type": "mrkdwn",
-                    "text": f"*분류* {category or '-'}   ·   *플래그* {flags or '없음'}",
+                    # 시트를 여럿 감시하면 행 번호만으로는 어느 회차인지 알 수 없다.
+                    # 그린 5회차 7행과 블루 5회차 7행이 동시에 존재한다.
+                    "text": (
+                        (f"*{sheet_title}*   ·   " if sheet_title else "")
+                        + f"*분류* {category or '-'}   ·   *플래그* {flags or '없음'}"
+                    ),
                 }
             ],
         },
@@ -221,7 +236,14 @@ MAX_INITIAL = 2900
 
 
 def revise_view(
-    *, row_number: int, question: str, draft: str, channel: str, ts: str, sheet_url: str
+    *,
+    row_number: int,
+    question: str,
+    draft: str,
+    channel: str,
+    ts: str,
+    sheet_url: str,
+    sheet_id: str = "",
 ) -> dict:
     """초안을 채워 넣은 편집 모달. 여기서 고친 내용이 최종답변이 된다."""
     trimmed = draft[:MAX_INITIAL]
@@ -264,8 +286,15 @@ def revise_view(
         "submit": {"type": "plain_text", "text": "저장하고 승인"},
         "close": {"type": "plain_text", "text": "취소"},
         # 모달 제출 시에는 원본 메시지 정보가 오지 않으므로 여기에 실어 보낸다.
+        # 시트 ID 도 함께 — 감시 시트가 여럿이면 행 번호만으로는 회차를 가릴 수 없다.
         "private_metadata": json.dumps(
-            {"row": row_number, "q": question[:KEY_LENGTH], "channel": channel, "ts": ts},
+            {
+                "row": row_number,
+                "q": question[:KEY_LENGTH],
+                "channel": channel,
+                "ts": ts,
+                "s": sheet_id,
+            },
             ensure_ascii=False,
         ),
         "blocks": blocks,

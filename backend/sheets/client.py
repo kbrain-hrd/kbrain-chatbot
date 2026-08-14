@@ -176,10 +176,33 @@ def find_header(worksheet: gspread.Worksheet) -> tuple[int, list[str]]:
     )
 
 
-def open_sheet() -> Sheet:
+def sheet_urls() -> list[str]:
+    """`.env` 의 SHEET_URL 을 여러 개로 읽는다.
+
+    회차마다 시트가 새로 생기고 등급도 그린·블루 둘이라, 한 개만 보는 구조로는
+    매번 `.env` 를 고쳐야 한다. 쉼표나 줄바꿈으로 나눠 적는다.
+    한 개만 적혀 있으면 예전과 똑같이 동작한다.
+    """
+    load_dotenv(PROJECT_ROOT / ".env")
+    raw = os.environ.get("SHEET_URL", "")
+    urls = [part.strip() for chunk in raw.splitlines() for part in chunk.split(",")]
+    return [u for u in urls if u]
+
+
+def open_sheets() -> list[Sheet]:
+    """적혀 있는 시트를 모두 연다. 하나라도 열리지 않으면 멈춘다 —
+    일부만 감시되는 상태를 모르고 지나가는 것이 가장 나쁘다."""
+    urls = sheet_urls()
+    if not urls:
+        raise SystemExit("SHEET_URL 이 없습니다. 프로젝트 루트의 .env 를 확인하세요.")
+    return [open_sheet(url) for url in urls]
+
+
+def open_sheet(url: str = "") -> Sheet:
     load_dotenv(PROJECT_ROOT / ".env")
 
-    url = os.environ.get("SHEET_URL", "")
+    # 인자가 없으면 예전처럼 .env 의 첫 번째 시트를 연다.
+    url = url or (sheet_urls() or [""])[0]
     credentials = os.environ.get("GOOGLE_CREDENTIALS", "")
     if not url:
         raise SystemExit("SHEET_URL 이 없습니다. 프로젝트 루트의 .env 를 확인하세요.")

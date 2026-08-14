@@ -46,6 +46,7 @@ from backend.sheets.client import (
     STATUS_HOLD,
     Sheet,
     open_sheet,
+    open_sheets,
 )
 from backend.slack import card
 
@@ -77,6 +78,8 @@ def post_card(sheet: Sheet, row_number: int, values: dict[str, str]) -> str:
         flags=values["flags"],
         sheet_url=sheet.row_url(row_number),
         trail=values.get("trail", ""),
+        sheet_id=sheet.worksheet.spreadsheet.id,
+        sheet_title=sheet.worksheet.spreadsheet.title,
     )
     response = WebClient(token=config["bot"]).chat_postMessage(
         channel=config["channel"],
@@ -114,20 +117,43 @@ def build_app() -> App:
         raise SystemExit("SLACK_APP_TOKEN 이 없습니다. Socket Mode 토큰(xapp-...)이 필요합니다.")
 
     app = App(token=config["bot"])
-    sheet = open_sheet()
+    sheets = open_sheets()
+    by_id = {s.worksheet.spreadsheet.id: s for s in sheets}
 
-    def resolve(body: str) -> tuple[int, dict[str, str] | None, str]:
+    def pick(sheet_id: str) -> tuple[Sheet | None, str]:
+        """카드가 가리키는 시트를 고른다.
+
+        **모르면 추측하지 않는다.** 시트가 여럿일 때 엉뚱한 회차에 답변을 적는 것이
+        답변을 못 다는 것보다 나쁘다. 옛 카드에는 시트 정보가 없어서, 시트가 하나뿐일
+        때만 그것으로 보고 여럿이면 사람에게 넘긴다.
+        """
+        if sheet_id:
+            found = by_id.get(sheet_id)
+            if found is None:
+                return None, "카드가 가리키는 시트가 지금 감시 목록에 없습니다. .env 의 SHEET_URL 을 확인하세요."
+            return found, ""
+        if len(sheets) == 1:
+            return sheets[0], ""
+        return None, (
+            "이 카드에는 시트 정보가 없습니다(감시 시트가 하나였을 때 만들어진 카드). "
+            "감시 중인 시트가 여러 개라 어느 회차인지 확정할 수 없으니 시트에서 직접 처리하세요."
+        )
+
+    def resolve(body: str) -> tuple[int, dict[str, str] | None, str, Sheet | None]:
         """버튼 value 로 시트 행을 찾고, 카드가 가리키던 질문과 같은지 대조한다."""
-        row_number, expected = card.parse_key(body)
+        row_number, expected, sheet_id = card.parse_key(body)
+        sheet, why = pick(sheet_id)
+        if sheet is None:
+            return row_number, None, why, None
         row = find_row(sheet, row_number)
         if row is None:
-            return row_number, None, f"{row_number}행을 찾지 못했습니다. 시트가 변경된 것 같습니다."
+            return row_number, None, f"{row_number}행을 찾지 못했습니다. 시트가 변경된 것 같습니다.", None
         if not row["question"].startswith(expected[: card.KEY_LENGTH]):
             return row_number, None, (
                 f"{row_number}행의 질문이 카드와 다릅니다. 행이 삽입·삭제된 것 같으니 "
                 "시트에서 직접 확인하세요."
-            )
-        return row_number, row, ""
+            ), None
+        return row_number, row, "", sheet
 
     def close_card(client: WebClient, body: dict, note: str) -> None:
         client.chat_update(
@@ -140,7 +166,7 @@ def build_app() -> App:
     @app.action("approve")
     def approve(ack, body, client, say) -> None:
         ack()
-        row_number, row, error = resolve(body["actions"][0]["value"])
+        row_number, row, error, sheet = resolve(body["actions"][0]["value"])
         if row is None:
             say(text=f"⚠️ {error}")
             return
@@ -170,7 +196,7 @@ def build_app() -> App:
         판단 다음에 필요한 것은 반려 표시가 아니라 **사람이 쓴 답**이다.
         """
         ack()
-        row_number, row, error = resolve(body["actions"][0]["value"])
+        row_number, row, error, sheet = resolve(body["actions"][0]["value"])
         if row is None:
             say(text=f"⚠️ {error}")
             return
@@ -184,6 +210,7 @@ def build_app() -> App:
                 channel=body["channel"]["id"],
                 ts=body["message"]["ts"],
                 sheet_url=sheet.row_url(row_number),
+                sheet_id=sheet.worksheet.spreadsheet.id,
             ),
         )
 
@@ -193,6 +220,12 @@ def build_app() -> App:
         meta = json.loads(view["private_metadata"])
         row_number = int(meta["row"])
         final = view["state"]["values"]["answer"]["value"]["value"].strip()
+
+        # 모달은 카드와 별개로 열리므로 시트를 다시 골라야 한다.
+        sheet, why = pick(meta.get("s", ""))
+        if sheet is None:
+            client.chat_postMessage(channel=meta["channel"], text=f"⚠️ {why}")
+            return
 
         row = find_row(sheet, row_number)
         if row is None or not row["question"].startswith(meta["q"][: card.KEY_LENGTH]):
@@ -233,7 +266,7 @@ def build_app() -> App:
         변경 금지 원칙에도 어긋나지 않는다.
         """
         ack()
-        row_number, row, error = resolve(body["actions"][0]["value"])
+        row_number, row, error, sheet = resolve(body["actions"][0]["value"])
         if row is None:
             say(text=f"⚠️ {error}")
             return
@@ -246,7 +279,7 @@ def build_app() -> App:
     def hold(ack, body, client, say) -> None:
         """지금 판단하기 어려운 건 — 시트에서 사람이 이어받는다."""
         ack()
-        row_number, row, error = resolve(body["actions"][0]["value"])
+        row_number, row, error, sheet = resolve(body["actions"][0]["value"])
         if row is None:
             say(text=f"⚠️ {error}")
             return
