@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import html
 import json
+import re
 
 # 슬랙 section 블록의 텍스트 상한은 3000자다. 여유를 두고 나눈다.
 MAX_SECTION = 2800
@@ -60,6 +61,21 @@ def extract_draft(blocks: list[dict]) -> str:
     return html.unescape("".join(text for _, text in sorted(parts)))
 
 
+GRADE_ROUND_RE = re.compile(r"(그린|블루)\s*(\d+)\s*회차")
+
+
+def short_title(title: str) -> str:
+    """시트 제목에서 '그린 5회차' 만 뽑는다.
+
+    카드 제목 줄에 넣을 것이라 짧아야 한다. 시트 제목 전체
+    ('AI 챔피언 그린 5회차 셀프스터디')를 그대로 넣으면 정작 몇 행인지가 밀려난다.
+    """
+    match = GRADE_ROUND_RE.search(title or "")
+    if match:
+        return f"{match.group(1)} {match.group(2)}회차"
+    return (title or "").strip()
+
+
 def row_key(row_number: int, question: str, sheet_id: str = "") -> str:
     """버튼에 실을 식별자. 행 번호·질문 앞부분과 함께 **어느 시트인지**를 담는다.
 
@@ -98,20 +114,24 @@ def build(
     # 그것이 무엇인지 알 수 없다 — 시트에서 뺀 컬럼이라 카드가 유일한 표시 자리다.
     blocks: list[dict] = [
         {
+            # 어느 회차인지를 제목 맨 앞에 둔다. 시트를 여럿 감시하면 행 번호만으로는
+            # 구분되지 않는다 — 그린 5회차 7행과 블루 5회차 7행이 동시에 존재한다.
             "type": "header",
-            "text": {"type": "plain_text", "text": f"검수 요청 · {row_number}행"},
+            "text": {
+                "type": "plain_text",
+                "text": (
+                    f"[{short_title(sheet_title)}] 검수 요청 · {row_number}행"
+                    if sheet_title
+                    else f"검수 요청 · {row_number}행"
+                ),
+            },
         },
         {
             "type": "context",
             "elements": [
                 {
                     "type": "mrkdwn",
-                    # 시트를 여럿 감시하면 행 번호만으로는 어느 회차인지 알 수 없다.
-                    # 그린 5회차 7행과 블루 5회차 7행이 동시에 존재한다.
-                    "text": (
-                        (f"*{sheet_title}*   ·   " if sheet_title else "")
-                        + f"*분류* {category or '-'}   ·   *플래그* {flags or '없음'}"
-                    ),
+                    "text": f"*분류* {category or '-'}   ·   *플래그* {flags or '없음'}",
                 }
             ],
         },

@@ -84,7 +84,10 @@ def post_card(sheet: Sheet, row_number: int, values: dict[str, str]) -> str:
     response = WebClient(token=config["bot"]).chat_postMessage(
         channel=config["channel"],
         blocks=blocks,
-        text=f"[{values['category']}] 검수 요청 · {row_number}행",
+        # 알림 미리보기(목록·모바일 배너)에 뜨는 줄. 여기에도 회차를 넣어야
+        # 카드를 열기 전에 어느 시트 건인지 알 수 있다.
+        text=f"[{card.short_title(sheet.worksheet.spreadsheet.title)}] "
+        f"[{values['category']}] 검수 요청 · {row_number}행",
     )
     return response["ts"]
 
