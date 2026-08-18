@@ -65,6 +65,11 @@ ALERT_AFTER = 5
 # 그래서 반대로 뒤집는다. 아침에 이 신호가 안 오면 멈춘 것이다.
 HEARTBEAT_HOUR = 9
 
+# 마지막으로 보낸 날을 파일에 남긴다. 메모리에만 두면 재시작할 때마다 "오늘은 이미
+# 보낸 것으로" 초기화돼, 매일 재시작되는 환경에서는 신호가 영영 안 나간다.
+# 파일에 두면 재시작해도 그날 것을 아직 안 보냈는지 알 수 있다.
+HEARTBEAT_PATH = Path(__file__).resolve().parents[2] / "logs" / "heartbeat.json"
+
 ACTION_FLAG = {
     "ask_grade": "등급되묻기필요",
     "escalate": "사람확인필요",
@@ -261,6 +266,25 @@ def check_regression(question: str, result: Result) -> str:
     return note
 
 
+def heartbeat_state() -> dict:
+    """마지막 생존 신호 기록을 읽는다. 없거나 깨졌으면 빈 상태로 본다."""
+    try:
+        return json.loads(HEARTBEAT_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def save_heartbeat(day: str, processed: int) -> None:
+    try:
+        HEARTBEAT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        HEARTBEAT_PATH.write_text(
+            json.dumps({"sent_on": day, "processed": processed}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        print(f"      생존 신호 기록 저장 실패 ({exc})")
+
+
 def alert(text: str) -> bool:
     """슬랙에 운영 경고를 올린다. **알림이 실패해도 폴링을 멈추지 않는다.**
 
@@ -404,25 +428,33 @@ def serve(once: bool = False) -> None:
         print(f"\n처리 {done}행")
         return
 
+    state = heartbeat_state()
+    beat_sent_on = state.get("sent_on", "")
+    processed_today = int(state.get("processed", 0))
+    print(f"생존 신호 — 매일 {HEARTBEAT_HOUR}시 이후 첫 사이클에 발송 "
+          f"(마지막 발송 {beat_sent_on or '없음'})")
     print(f"{interval}초 간격 폴링. 중지는 Ctrl+C.\n")
     failures = 0
     alerted = False
-    # 시작한 날은 보내지 않는다. 방금 띄운 것을 굳이 알릴 값이 없다.
-    beat_sent_on = datetime.now().date()
-    processed_today = 0
     try:
         while True:
             now = datetime.now()
-            stamp = now.strftime("%H:%M:%S")
+            stamp = now.strftime("%m-%d %H:%M:%S")
 
-            if now.date() != beat_sent_on and now.hour >= HEARTBEAT_HOUR:
-                if alert(
+            # 오늘 것을 아직 안 보냈고 발송 시각이 지났으면 보낸다. **기록은 파일에**
+            # 남기므로 재시작해도 그날 것을 건너뛰거나 두 번 보내지 않는다.
+            today = now.strftime("%Y-%m-%d")
+            if today != beat_sent_on and now.hour >= HEARTBEAT_HOUR:
+                sent = alert(
                     f"🟢 문의 대응 서비스 정상 가동 중 ({now:%m월 %d일 %H:%M})\n"
-                    f"어제 처리 {processed_today}건. "
+                    f"직전 발송 이후 처리 {processed_today}건. "
                     "이 신호가 안 오는 날은 서비스가 멈춘 것입니다."
-                ):
-                    beat_sent_on = now.date()
+                )
+                print(f"[{stamp}] 생존 신호 {'발송' if sent else '발송 실패 — 다음 사이클에 재시도'}")
+                if sent:
+                    beat_sent_on = today
                     processed_today = 0
+                    save_heartbeat(today, 0)
 
             # **한 사이클이 실패해도 루프를 끝내지 않는다.** 구글 시트 연결이 끊기는 일은
             # 실제로 일어나고(ConnectionResetError 실측, 2026-08-03), 그걸로 폴링이
@@ -456,6 +488,7 @@ def serve(once: bool = False) -> None:
                 alerted = False
             if done:
                 processed_today += done
+                save_heartbeat(beat_sent_on, processed_today)
                 print(f"[{stamp}] 처리 {done}행\n")
             time.sleep(interval)
     except KeyboardInterrupt:
