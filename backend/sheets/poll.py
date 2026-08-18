@@ -34,6 +34,7 @@ from backend.answer.classify import build_client, classify, load_catalog
 from backend.answer.draft import load_materials, make_draft
 from backend.search.index import HybridIndex, build_hybrid_index
 from backend.sheets.client import (
+    STATUS_DONE,
     STATUS_REVIEW,
     Sheet,
     is_pending,
@@ -298,6 +299,34 @@ def alert(text: str) -> bool:
         return False
 
 
+def fill_missing_dates(sheet: Sheet) -> int:
+    """답변은 있는데 답변일이 비어 있는 행에 오늘 날짜를 넣는다.
+
+    시트에서 사람이 직접 답을 써 넣으면 날짜가 비어 있게 된다. 슬랙 승인으로 들어온
+    답변만 날짜가 붙기 때문이다. 그러면 언제 답했는지 알 수 없는 행이 쌓인다.
+
+    **`답변완료` 인 행만 건드린다.** 다른 상태는 아직 확정된 답이 아니므로 날짜를
+    붙이면 끝난 것처럼 보인다. 답변 본문은 손대지 않는다.
+
+    적는 날짜는 **처음 발견한 날**이다. 실제로 답한 날을 알 방법이 없어서다.
+    비워 두는 것보다는 낫지만 정확한 답변일은 아니다.
+    """
+    today = datetime.now().strftime("%Y-%m-%d")
+    filled = 0
+    for row in sheet.read(("status", "answer", "answered_at")):
+        if row.get("status", "").strip() != STATUS_DONE:
+            continue
+        if not row.get("answer", "").strip():
+            continue
+        if row.get("answered_at", "").strip():
+            continue
+        row_number = int(row["_row"])
+        sheet.write(row_number, {"answered_at": today})
+        print(f"  {row_number}행 답변일 비어 있어 {today} 로 채움")
+        filled += 1
+    return filled
+
+
 def run_once(
     sheet: Sheet,
     client: anthropic.Anthropic,
@@ -306,6 +335,8 @@ def run_once(
     index: HybridIndex,
 ) -> int:
     """미처리 행을 처리한다. 처리한 행 수를 돌려준다."""
+    fill_missing_dates(sheet)
+
     rows = sheet.read(("status", "question"))
     pending = [row for row in rows if is_pending(row)]
 
