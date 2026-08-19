@@ -43,7 +43,7 @@ from backend.sheets.client import (
     question_of,
 )
 from backend.sheets.goldset import sheet_grade_of
-from backend.slack.app import post_alert, post_card
+from backend.slack.app import close_sheet_handled, post_alert, post_card
 
 DEFAULT_INTERVAL = 60
 
@@ -326,6 +326,27 @@ def alert(text: str) -> bool:
         return False
 
 
+def sync_cards(sheet: Sheet) -> int:
+    """시트에서 처리된 건의 슬랙 카드를 닫는다.
+
+    담당자가 슬랙 버튼 대신 **시트에 직접 답을 써 넣으면** 카드는 버튼이 달린 채로 남는다.
+    그러면 채널만 봐서는 무엇이 끝났는지 알 수 없어, 위로 스크롤하며 시트와 대조해야 한다.
+
+    카드를 지우지는 않는다. 버튼만 떼고 처리됐다는 표시를 붙여 **완료된 모습으로 남긴다.**
+    슬랙에서 누른 건은 그때 목록에서 빠지므로 여기 걸리지 않는다 — 처리 기록이 덮이지 않는다.
+    """
+    closed = 0
+    for row in sheet.read(("status",)):
+        status = row.get("status", "").strip()
+        if not status or status in (STATUS_REVIEW, STATUS_HOLD):
+            continue  # 아직 사람 손이 필요한 건은 카드를 열어 둔다
+        row_number = int(row["_row"])
+        if close_sheet_handled(sheet, row_number, status):
+            print(f"  {row_number}행 시트에서 처리됨({status}) — 슬랙 카드 닫음")
+            closed += 1
+    return closed
+
+
 def fill_missing_dates(sheet: Sheet) -> int:
     """답변은 있는데 답변일이 비어 있는 행에 오늘 날짜를 넣는다.
 
@@ -363,6 +384,7 @@ def run_once(
 ) -> int:
     """미처리 행을 처리한다. 처리한 행 수를 돌려준다."""
     fill_missing_dates(sheet)
+    sync_cards(sheet)
 
     rows = sheet.read(("status", "question"))
     pending = [row for row in rows if is_pending(row)]

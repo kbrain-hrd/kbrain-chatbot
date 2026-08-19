@@ -63,6 +63,71 @@ def settings() -> dict[str, str]:
     }
 
 
+# 올린 카드의 위치. 나중에 **시트에서 처리된 건의 카드를 닫기 위해** 필요하다.
+# 슬랙 봇 권한이 chat:write 뿐이라 채널을 되읽을 수 없으므로, 올릴 때 남겨 두지 않으면
+# 그 카드를 다시 찾아갈 방법이 없다. 블록도 함께 둔다 — 닫을 때 원문을 그대로 살려
+# 초안·근거가 카드에 남게 하기 위해서다.
+CARD_PATH = PROJECT_ROOT / "logs" / "cards.json"
+
+
+def load_cards() -> dict[str, dict]:
+    try:
+        return json.loads(CARD_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def save_cards(cards: dict[str, dict]) -> None:
+    try:
+        CARD_PATH.parent.mkdir(parents=True, exist_ok=True)
+        CARD_PATH.write_text(json.dumps(cards, ensure_ascii=False), encoding="utf-8")
+    except OSError as exc:
+        print(f"      카드 위치 기록 실패 ({exc})")
+
+
+def card_key(sheet_id: str, row_number: int) -> str:
+    return f"{sheet_id}:{row_number}"
+
+
+def forget_card(sheet_id: str, row_number: int) -> None:
+    """슬랙에서 처리된 카드는 목록에서 뺀다.
+
+    빼지 않으면 폴링이 그 카드를 다시 닫으면서 `✅ 승인` 같은 처리 기록을 덮어쓴다.
+    목록에 남아 있는 것은 **슬랙에서 손대지 않은 카드**뿐이어야 한다.
+    """
+    cards = load_cards()
+    if cards.pop(card_key(sheet_id, row_number), None) is not None:
+        save_cards(cards)
+
+
+def close_sheet_handled(sheet: Sheet, row_number: int, status: str) -> bool:
+    """시트에서 처리된 건의 카드를 닫는다. 카드는 지우지 않고 버튼만 뗀다."""
+    config = settings()
+    if not (config["bot"] and config["channel"]):
+        return False
+    cards = load_cards()
+    key = card_key(sheet.worksheet.spreadsheet.id, row_number)
+    entry = cards.get(key)
+    if not entry:
+        return False
+
+    note = f"📄 시트에서 처리됨 → `{status}`"
+    try:
+        WebClient(token=config["bot"]).chat_update(
+            channel=entry["channel"],
+            ts=entry["ts"],
+            blocks=card.result_blocks(entry["blocks"], note),
+            text=note,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"      {row_number}행 카드 갱신 실패 ({type(exc).__name__}: {exc})")
+        return False
+
+    cards.pop(key, None)
+    save_cards(cards)
+    return True
+
+
 def post_card(sheet: Sheet, row_number: int, values: dict[str, str]) -> str:
     """검수 카드를 채널에 올린다. 슬랙이 설정돼 있지 않으면 빈 문자열을 돌려준다."""
     config = settings()
@@ -89,6 +154,14 @@ def post_card(sheet: Sheet, row_number: int, values: dict[str, str]) -> str:
         text=f"[{card.short_title(sheet.worksheet.spreadsheet.title)}] "
         f"[{values['category']}] 검수 요청 · {row_number}행",
     )
+
+    cards = load_cards()
+    cards[card_key(sheet.worksheet.spreadsheet.id, row_number)] = {
+        "channel": response["channel"],
+        "ts": response["ts"],
+        "blocks": blocks,
+    }
+    save_cards(cards)
     return response["ts"]
 
 
@@ -158,7 +231,17 @@ def build_app() -> App:
             ), None
         return row_number, row, "", sheet
 
-    def close_card(client: WebClient, body: dict, note: str) -> None:
+    def close_card(
+        client: WebClient,
+        body: dict,
+        note: str,
+        sheet: Sheet | None = None,
+        row_number: int | None = None,
+    ) -> None:
+        # 슬랙에서 처리한 카드는 추적 목록에서 뺀다. 남겨 두면 폴링이 그 카드를 다시
+        # 닫으면서 "승인" 같은 처리 기록을 덮어쓴다.
+        if sheet is not None and row_number is not None:
+            forget_card(sheet.worksheet.spreadsheet.id, row_number)
         client.chat_update(
             channel=body["channel"]["id"],
             ts=body["message"]["ts"],
@@ -189,7 +272,8 @@ def build_app() -> App:
                 "status": STATUS_DONE,
             },
         )
-        close_card(client, body, f"✅ *{who}* 승인 → 시트 {row_number}행 `{STATUS_DONE}`")
+        close_card(client, body, f"✅ *{who}* 승인 → 시트 {row_number}행 `{STATUS_DONE}`",
+                   sheet, row_number)
 
     @app.action("revise")
     def revise(ack, body, client, say) -> None:
@@ -247,6 +331,7 @@ def build_app() -> App:
                 "status": STATUS_DONE,
             },
         )
+        forget_card(sheet.worksheet.spreadsheet.id, row_number)
         client.chat_update(
             channel=meta["channel"],
             ts=meta["ts"],
@@ -276,7 +361,8 @@ def build_app() -> App:
 
         who = body["user"].get("name") or body["user"]["id"]
         sheet.write(row_number, {"status": ""})
-        close_card(client, body, f"🔄 *{who}* 재판정 요청 → 다음 폴링에서 다시 처리됩니다")
+        close_card(client, body, f"🔄 *{who}* 재판정 요청 → 다음 폴링에서 다시 처리됩니다",
+                   sheet, row_number)
 
     @app.action("hold")
     def hold(ack, body, client, say) -> None:
@@ -289,7 +375,8 @@ def build_app() -> App:
 
         who = body["user"].get("name") or body["user"]["id"]
         sheet.write(row_number, {"status": STATUS_HOLD})
-        close_card(client, body, f"⏸️ *{who}* 보류 → 시트 {row_number}행 `{STATUS_HOLD}`")
+        close_card(client, body, f"⏸️ *{who}* 보류 → 시트 {row_number}행 `{STATUS_HOLD}`",
+                   sheet, row_number)
 
     @app.action("open_sheet")
     def open_sheet_link(ack) -> None:
