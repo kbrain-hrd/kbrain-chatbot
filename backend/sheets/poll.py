@@ -35,6 +35,7 @@ from backend.answer.draft import load_materials, make_draft
 from backend.search.index import HybridIndex, build_hybrid_index
 from backend.sheets.client import (
     STATUS_DONE,
+    STATUS_HOLD,
     STATUS_REVIEW,
     Sheet,
     is_pending,
@@ -65,6 +66,11 @@ ALERT_AFTER = 5
 # 2026-08-07 에 창이 닫혀 6일간 멈춰 있었는데 아무도 몰랐다.
 # 그래서 반대로 뒤집는다. 아침에 이 신호가 안 오면 멈춘 것이다.
 HEARTBEAT_HOUR = 9
+
+# 미처리가 남아 있으면 저녁에 한 번 더 알린다. 아침에 확인하고 넘긴 뒤 낮에 쌓이는 건이
+# 다음 날까지 묻히는 것을 막는다. 하루 1~9건 규모라 시간 기반(N시간 경과)으로 알리면
+# 산발적이고 시끄럽다. 정해진 시각에 한 번 보는 쪽이 조용하다.
+REMINDER_HOUR = 18
 
 # 마지막으로 보낸 날을 파일에 남긴다. 메모리에만 두면 재시작할 때마다 "오늘은 이미
 # 보낸 것으로" 초기화돼, 매일 재시작되는 환경에서는 신호가 영영 안 나간다.
@@ -267,6 +273,27 @@ def check_regression(question: str, result: Result) -> str:
     return note
 
 
+def pending_summary(targets: list) -> tuple[int, str]:
+    """사람 손이 필요한 행을 시트별로 모아 (건수, 목록 문구) 로 돌려준다.
+
+    `검수대기` 는 카드가 갔는데 아직 버튼을 안 누른 것이고, `답변대기` 는 보류해 둔 것이다.
+    둘 다 사람이 이어받아야 끝난다. 상태가 빈 행은 다음 폴링에서 처리되므로 세지 않는다.
+    """
+    lines: list[str] = []
+    total = 0
+    for sheet, title, _ in targets:
+        rows = [
+            int(row["_row"])
+            for row in sheet.read(("status",))
+            if row.get("status", "").strip() in (STATUS_REVIEW, STATUS_HOLD)
+        ]
+        if rows:
+            total += len(rows)
+            short = title.replace("AI 챔피언 ", "").replace(" 셀프스터디", "")
+            lines.append(f"  · {short} — {', '.join(f'{n}행' for n in rows)}")
+    return total, "\n".join(lines)
+
+
 def heartbeat_state() -> dict:
     """마지막 생존 신호 기록을 읽는다. 없거나 깨졌으면 빈 상태로 본다."""
     try:
@@ -462,8 +489,10 @@ def serve(once: bool = False) -> None:
     state = heartbeat_state()
     beat_sent_on = state.get("sent_on", "")
     processed_today = int(state.get("processed", 0))
+    reminded_on = state.get("reminded_on", "")
     print(f"생존 신호 — 매일 {HEARTBEAT_HOUR}시 이후 첫 사이클에 발송 "
           f"(마지막 발송 {beat_sent_on or '없음'})")
+    print(f"미처리 알림 — 매일 {REMINDER_HOUR}시 이후, 남은 건이 있을 때만")
     print(f"{interval}초 간격 폴링. 중지는 Ctrl+C.\n")
     failures = 0
     alerted = False
@@ -476,16 +505,36 @@ def serve(once: bool = False) -> None:
             # 남기므로 재시작해도 그날 것을 건너뛰거나 두 번 보내지 않는다.
             today = now.strftime("%Y-%m-%d")
             if today != beat_sent_on and now.hour >= HEARTBEAT_HOUR:
-                sent = alert(
+                waiting, listing = pending_summary(targets)
+                body = (
                     f"🟢 문의 대응 서비스 정상 가동 중 ({now:%m월 %d일 %H:%M})\n"
                     f"직전 발송 이후 처리 {processed_today}건. "
                     "이 신호가 안 오는 날은 서비스가 멈춘 것입니다."
                 )
-                print(f"[{stamp}] 생존 신호 {'발송' if sent else '발송 실패 — 다음 사이클에 재시도'}")
+                if waiting:
+                    body += f"\n\n📋 아직 손이 필요한 건 {waiting}건\n{listing}"
+                sent = alert(body)
+                print(f"[{stamp}] 생존 신호 {'발송' if sent else '발송 실패 — 다음 사이클에 재시도'}"
+                      f" (미처리 {waiting}건)")
                 if sent:
                     beat_sent_on = today
                     processed_today = 0
+                    reminded_on = ""  # 새 날이 시작됐으니 저녁 알림도 다시 열어 둔다
                     save_heartbeat(today, 0)
+
+            # 저녁 리마인드 — 미처리가 있을 때만 보낸다. 아침에 확인하고 넘긴 뒤 낮에
+            # 쌓인 건이 다음 날까지 묻히는 것을 막는다.
+            if today != reminded_on and now.hour >= REMINDER_HOUR:
+                waiting, listing = pending_summary(targets)
+                if not waiting:
+                    reminded_on = today  # 없으면 조용히 넘어간다
+                elif alert(
+                    f"📋 아직 손이 필요한 건 {waiting}건 ({now:%m월 %d일 %H:%M})\n{listing}\n"
+                    "슬랙 카드에서 처리하거나 시트에서 직접 답하시면 됩니다."
+                ):
+                    reminded_on = today
+                    save_heartbeat(beat_sent_on, processed_today, reminded_on)
+                    print(f"[{stamp}] 미처리 알림 발송 ({waiting}건)")
 
             # **한 사이클이 실패해도 루프를 끝내지 않는다.** 구글 시트 연결이 끊기는 일은
             # 실제로 일어나고(ConnectionResetError 실측, 2026-08-03), 그걸로 폴링이
@@ -519,7 +568,7 @@ def serve(once: bool = False) -> None:
                 alerted = False
             if done:
                 processed_today += done
-                save_heartbeat(beat_sent_on, processed_today)
+                save_heartbeat(beat_sent_on, processed_today, reminded_on)
                 print(f"[{stamp}] 처리 {done}행\n")
             time.sleep(interval)
     except KeyboardInterrupt:
