@@ -61,11 +61,12 @@ ESCALATE_RETRIES = 2
 # 이 정도면 일시적 오류로 보기 어렵다. 기본 간격(60초)에서 약 5분에 해당한다.
 ALERT_AFTER = 5
 
-# 하루 한 번 "살아 있다"고 알리는 시각(시). **죽은 뒤에는 알릴 주체가 없다** —
+# 하루 한 번 "살아 있다"고 알리는 시각. **죽은 뒤에는 알릴 주체가 없다** —
 # 폴링 실패는 알리지만 서비스가 통째로 사라지면 아무 일도 일어나지 않는다.
 # 2026-08-07 에 창이 닫혀 6일간 멈춰 있었는데 아무도 몰랐다.
 # 그래서 반대로 뒤집는다. 아침에 이 신호가 안 오면 멈춘 것이다.
-HEARTBEAT_HOUR = 9
+HEARTBEAT_HOUR = 8
+HEARTBEAT_MINUTE = 30
 
 # 미처리가 남아 있으면 저녁에 한 번 더 알린다. 아침에 확인하고 넘긴 뒤 낮에 쌓이는 건이
 # 다음 날까지 묻히는 것을 막는다. 하루 1~9건 규모라 시간 기반(N시간 경과)으로 알리면
@@ -512,7 +513,7 @@ def serve(once: bool = False) -> None:
     beat_sent_on = state.get("sent_on", "")
     processed_today = int(state.get("processed", 0))
     reminded_on = state.get("reminded_on", "")
-    print(f"생존 신호 — 매일 {HEARTBEAT_HOUR}시 이후 첫 사이클에 발송 "
+    print(f"생존 신호 — 매일 {HEARTBEAT_HOUR}:{HEARTBEAT_MINUTE:02d} 이후 첫 사이클에 발송 "
           f"(마지막 발송 {beat_sent_on or '없음'})")
     print(f"미처리 알림 — 매일 {REMINDER_HOUR}시 이후, 남은 건이 있을 때만")
     print(f"{interval}초 간격 폴링. 중지는 Ctrl+C.\n")
@@ -526,7 +527,7 @@ def serve(once: bool = False) -> None:
             # 오늘 것을 아직 안 보냈고 발송 시각이 지났으면 보낸다. **기록은 파일에**
             # 남기므로 재시작해도 그날 것을 건너뛰거나 두 번 보내지 않는다.
             today = now.strftime("%Y-%m-%d")
-            if today != beat_sent_on and now.hour >= HEARTBEAT_HOUR:
+            if today != beat_sent_on and (now.hour, now.minute) >= (HEARTBEAT_HOUR, HEARTBEAT_MINUTE):
                 waiting, listing = pending_summary(targets)
                 body = (
                     f"🟢 문의 대응 서비스 정상 가동 중 ({now:%m월 %d일 %H:%M})\n"
