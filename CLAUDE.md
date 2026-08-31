@@ -11,6 +11,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 초안 32건 검수(4단계). 실제 운영 시트 적용 전에 `docs/04-open-questions.md` 2-9
 (원본 xlsx → 구글 시트 변환)가 해결돼야 합니다.
 
+**시범 운영 중 방향이 하나 바뀌었습니다(2026-08-31).** 게시판이 받는 문의의 범위를
+**셀프스터디 학습 문의로 한정**하고, 인증평가 응시는 CBT 담당·그 밖은 운영사무국으로
+넘깁니다(`docs/04-open-questions.md` 2-11). 챗봇 분류를 이 경계에 맞추는 작업이
+**미착수**입니다. 회차 종료 시 시트를 닫는 절차는 `docs/06-operations.md` 8 에 있습니다.
+
 코드를 작성하기 전에 해당 단계의 설계 문서를 먼저 읽으세요.
 설계는 이미 세 번 뒤집혔고(`docs/01-design.md` 2장), 그 이유가 문서에 남아 있습니다.
 
